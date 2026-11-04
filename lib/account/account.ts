@@ -28,6 +28,8 @@ export type CurrentUser = {
   homeRegion: Region | null;
   needsOnboarding: boolean;
   calendarConnection: CalendarConnectionSummary | null;
+  // Onboarding's one-time 캘린더 연동 권유 is still pending.
+  shouldInviteCalendar: boolean;
 };
 
 export function createAccount(config: AccountConfig) {
@@ -48,6 +50,12 @@ export function createAccount(config: AccountConfig) {
       additionalFields: {
         // Set only through setHomeRegion, never from client input.
         homeRegion: { type: "string", required: false, input: false },
+        calendarInviteSeen: {
+          type: "boolean",
+          required: false,
+          defaultValue: false,
+          input: false,
+        },
       },
     },
     plugins: config.plugins ?? [],
@@ -63,6 +71,11 @@ export function createAccount(config: AccountConfig) {
     },
     encryptionKey: config.tokenEncryptionKey,
   });
+
+  async function markCalendarInviteSeen(userId: string) {
+    const context = await auth.$context;
+    await context.internalAdapter.updateUser(userId, { calendarInviteSeen: true });
+  }
 
   async function requireSession(headers: Headers) {
     const session = await auth.api.getSession({ headers });
@@ -84,6 +97,7 @@ export function createAccount(config: AccountConfig) {
       if (!session) return null;
       const { id, name, email, image } = session.user;
       const homeRegion = findRegion(session.user.homeRegion);
+      const calendarConnection = await calendar.summary(id);
       return {
         id,
         name,
@@ -91,7 +105,9 @@ export function createAccount(config: AccountConfig) {
         image: image ?? null,
         homeRegion,
         needsOnboarding: homeRegion === null,
-        calendarConnection: await calendar.summary(id),
+        calendarConnection,
+        shouldInviteCalendar:
+          homeRegion !== null && !session.user.calendarInviteSeen && calendarConnection === null,
       };
     },
 
@@ -107,7 +123,13 @@ export function createAccount(config: AccountConfig) {
     // where the callback lands afterwards.
     async startCalendarConnection(headers: Headers, returnTo: string) {
       const { user } = await requireSession(headers);
+      await markCalendarInviteSeen(user.id);
       return calendar.start(user.id, returnTo);
+    },
+
+    async dismissCalendarInvite(headers: Headers) {
+      const { user } = await requireSession(headers);
+      await markCalendarInviteSeen(user.id);
     },
 
     async completeCalendarConnection(headers: Headers, callbackParams: URLSearchParams) {

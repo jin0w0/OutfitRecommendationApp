@@ -19,7 +19,8 @@ export async function signOutEverywhere() {
 export async function saveHomeRegion(formData: FormData) {
   const requestHeaders = await headers();
   await getAccount().setHomeRegion(requestHeaders, String(formData.get("region")));
-  redirect(formData.get("next") === "/settings" ? "/settings" : "/home");
+  const next = formData.get("next");
+  redirect(next === "/settings" || next === "/onboarding" ? next : "/home");
 }
 
 export async function saveCalendarSelection(formData: FormData) {
@@ -27,4 +28,10 @@ export async function saveCalendarSelection(formData: FormData) {
   const calendarIds = formData.getAll("calendar").map(String);
   await getAccount().selectCalendars(requestHeaders, calendarIds);
   redirect("/settings");
+}
+
+export async function skipCalendarInvite() {
+  const requestHeaders = await headers();
+  await getAccount().dismissCalendarInvite(requestHeaders);
+  redirect("/home");
 }

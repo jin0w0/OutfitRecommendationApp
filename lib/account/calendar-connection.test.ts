@@ -187,3 +187,39 @@ describe("calendar selection", () => {
     expect(await account.getSelectedCalendarIds(user!.id)).toEqual(["minji@kangnam.ac.kr"]);
   });
 });
+
+describe("calendar invite during onboarding", () => {
+  async function minjiAfterHomeRegion() {
+    const harness = await minjiWithSchoolAccount();
+    await harness.account.setHomeRegion(harness.headers, "gyeonggi");
+    return harness;
+  }
+
+  test("after choosing a home region, a new user is invited to connect a calendar", async () => {
+    const { account, headers } = await minjiAfterHomeRegion();
+
+    expect((await account.getCurrentUser(headers))?.shouldInviteCalendar).toBe(true);
+  });
+
+  test("once skipped, the invite is not shown again", async () => {
+    const { account, headers } = await minjiAfterHomeRegion();
+
+    await account.dismissCalendarInvite(headers);
+
+    expect((await account.getCurrentUser(headers))?.shouldInviteCalendar).toBe(false);
+  });
+
+  test("starting a connection from the invite counts as having seen it", async () => {
+    const { account, headers } = await minjiAfterHomeRegion();
+
+    await account.startCalendarConnection(headers, "/home");
+
+    expect((await account.getCurrentUser(headers))?.shouldInviteCalendar).toBe(false);
+  });
+
+  test("the invite is not shown before the home region is chosen", async () => {
+    const { account, headers } = await minjiWithSchoolAccount();
+
+    expect((await account.getCurrentUser(headers))?.shouldInviteCalendar).toBe(false);
+  });
+});

@@ -7,7 +7,7 @@ export function RegionForm({
   submitLabel,
 }: {
   current: Region | null;
-  next: "/home" | "/settings";
+  next: "/onboarding" | "/settings";
   submitLabel: string;
 }) {
   return (
