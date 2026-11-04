@@ -18,6 +18,7 @@ async function UserBar() {
   const requestHeaders = await headers();
   const user = await getAccount().getCurrentUser(requestHeaders);
   if (!user) redirect("/?next=/home");
+  if (user.needsOnboarding) redirect("/onboarding");
 
   return (
     <header className="flex items-center gap-3">

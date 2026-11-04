@@ -59,6 +59,53 @@ describe("sign in", () => {
   });
 });
 
+describe("home region", () => {
+  test("a new user has no home region yet and still needs onboarding", async () => {
+    const { account, google, signInWithGoogle } = await createTestAccount();
+    google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+
+    const { headers } = await signInWithGoogle("minji@gmail.com");
+
+    expect(await account.getCurrentUser(headers)).toMatchObject({
+      homeRegion: null,
+      needsOnboarding: true,
+    });
+  });
+
+  test("choosing a home region finishes onboarding", async () => {
+    const { account, google, signInWithGoogle } = await createTestAccount();
+    google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    const { headers } = await signInWithGoogle("minji@gmail.com");
+
+    await account.setHomeRegion(headers, "gyeonggi");
+
+    expect(await account.getCurrentUser(headers)).toMatchObject({
+      homeRegion: { id: "gyeonggi", name: "경기" },
+      needsOnboarding: false,
+    });
+  });
+
+  test("the home region can be changed later", async () => {
+    const { account, google, signInWithGoogle } = await createTestAccount();
+    google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    const { headers } = await signInWithGoogle("minji@gmail.com");
+    await account.setHomeRegion(headers, "gyeonggi");
+
+    await account.setHomeRegion(headers, "busan");
+
+    expect((await account.getCurrentUser(headers))?.homeRegion?.name).toBe("부산");
+  });
+
+  test("a region outside the list is refused", async () => {
+    const { account, google, signInWithGoogle } = await createTestAccount();
+    google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    const { headers } = await signInWithGoogle("minji@gmail.com");
+
+    await expect(account.setHomeRegion(headers, "atlantis")).rejects.toThrow();
+    expect((await account.getCurrentUser(headers))?.homeRegion).toBeNull();
+  });
+});
+
 describe("sign out", () => {
   test("signing out ends only this device's session", async () => {
     const { account, google, signInWithGoogle } = await createTestAccount();

@@ -15,3 +15,9 @@ export async function signOutEverywhere() {
   await getAccount().signOutEverywhere(requestHeaders);
   redirect("/");
 }
+
+export async function saveHomeRegion(formData: FormData) {
+  const requestHeaders = await headers();
+  await getAccount().setHomeRegion(requestHeaders, String(formData.get("region")));
+  redirect(formData.get("next") === "/settings" ? "/settings" : "/home");
+}

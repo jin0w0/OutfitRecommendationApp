@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import { signOutEverywhere } from "../actions";
+import { RegionForm } from "../region-form";
 
 export default function Settings() {
   return (
@@ -21,9 +22,24 @@ async function SettingsSections() {
   if (!user) redirect("/?next=/settings");
 
   return (
+    <>
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium">기본 지역</h2>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          장소가 없는 일정은 이 지역의 날씨로 추천해요.
+        </p>
+        <RegionForm current={user.homeRegion} next="/settings" submitLabel="저장" />
+      </section>
+      <LoginSection email={user.email} />
+    </>
+  );
+}
+
+function LoginSection({ email }: { email: string }) {
+  return (
     <section className="flex flex-col gap-3">
       <h2 className="font-medium">로그인</h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{user.email}(으)로 로그인했어요.</p>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{email}(으)로 로그인했어요.</p>
       <form action={signOutEverywhere}>
         <button type="submit" className="text-sm text-red-600 underline">
           모든 기기에서 로그아웃
