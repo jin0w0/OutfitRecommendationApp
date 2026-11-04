@@ -21,6 +21,7 @@ type Grant = {
 };
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const CALENDAR_LIST_ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/calendarList";
 
 export class FakeGoogle {
@@ -29,6 +30,7 @@ export class FakeGoogle {
   private grants = new Map<string, Grant>();
   private accessTokens = new Map<string, Grant>();
   private counter = 0;
+  private revocationsFail = false;
 
   addAccount(profile: GoogleProfile) {
     const account = {
@@ -59,6 +61,15 @@ export class FakeGoogle {
     }
   }
 
+  // Whether the account still has a live grant for this app.
+  isAppAuthorized(email: string) {
+    return [...this.grants.values()].some((g) => g.account.email === email && !g.revoked);
+  }
+
+  failRevocations() {
+    this.revocationsFail = true;
+  }
+
   // Which Google account an access token was issued for, or null if unknown.
   ownerOfAccessToken(accessToken: string) {
     return this.accessTokens.get(accessToken)?.account.email ?? null;
@@ -68,6 +79,7 @@ export class FakeGoogle {
     const request = new Request(input, init);
     if (request.url === TOKEN_ENDPOINT) return this.token(request);
     if (request.url === CALENDAR_LIST_ENDPOINT) return this.calendarList(request);
+    if (request.url === REVOKE_ENDPOINT) return this.revoke(request);
     throw new Error(`FakeGoogle: unexpected request to ${request.url}`);
   };
 
@@ -103,6 +115,17 @@ export class FakeGoogle {
       scope: pending.scope,
       id_token: unsignedIdToken(pending.account),
     });
+  }
+
+  // Like Google, revoking any token removes the app's whole authorization for
+  // that account, so every token issued to it stops working.
+  private async revoke(request: Request) {
+    if (this.revocationsFail) return new Response("unavailable", { status: 503 });
+    const token = new URLSearchParams(await request.text()).get("token") ?? "";
+    const grant = this.grants.get(token) ?? this.accessTokens.get(token);
+    if (!grant) return Response.json({ error: "invalid_token" }, { status: 400 });
+    this.revokeAccessFromGoogle(grant.account.email);
+    return new Response(null, { status: 200 });
   }
 
   private calendarList(request: Request) {

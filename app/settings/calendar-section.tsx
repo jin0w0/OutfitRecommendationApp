@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { CurrentUser } from "@/lib/account/account";
 import { ReconnectNotice } from "../reconnect-notice";
 import { CalendarChoices } from "./calendar-choices";
+import { DisconnectCalendar } from "./disconnect-calendar";
 
 const MESSAGES: Record<string, string> = {
   cancelled: "캘린더 연동을 취소했어요.",
@@ -34,6 +35,7 @@ export function CalendarSection({
           <CalendarChoices />
         </Suspense>
       )}
+      {connection && <DisconnectCalendar email={connection.email} />}
       {!connection && (
         // A plain link: the route redirects the browser to Google.
         <a

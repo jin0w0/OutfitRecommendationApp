@@ -15,6 +15,8 @@ export type AccountConfig = {
   google: { clientId: string; clientSecret: string };
   // Encrypts the 캘린더 연동 tokens at rest.
   tokenEncryptionKey: string;
+  // Lets other features clear data tied to a 캘린더 연동 when it goes away.
+  onCalendarDisconnected?: (userId: string) => Promise<void>;
   plugins?: BetterAuthPlugin[];
 };
 
@@ -70,6 +72,7 @@ export function createAccount(config: AccountConfig) {
       redirectURI: `${config.baseURL}/api/calendar/callback`,
     },
     encryptionKey: config.tokenEncryptionKey,
+    onDisconnected: config.onCalendarDisconnected ?? (async () => {}),
   });
 
   async function markCalendarInviteSeen(userId: string) {
@@ -145,6 +148,11 @@ export function createAccount(config: AccountConfig) {
     async selectCalendars(headers: Headers, calendarIds: string[]) {
       const { user } = await requireSession(headers);
       await calendar.selectCalendars(user.id, calendarIds);
+    },
+
+    async disconnectCalendar(headers: Headers) {
+      const { user } = await requireSession(headers);
+      await calendar.disconnect(user.id);
     },
 
     // For server-side callers (the calendar adapter) that already know the user.

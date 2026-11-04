@@ -3,6 +3,7 @@
 
 const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
@@ -83,6 +84,16 @@ async function requestTokens(params: Record<string, string>): Promise<GoogleToke
     scope: body.scope,
     idToken: body.id_token ?? null,
   };
+}
+
+// Removes the app's authorization for the Google account the token belongs to.
+export async function revokeToken(token: string) {
+  const response = await fetch(REVOKE_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token }),
+  });
+  if (!response.ok) throw new Error(`Google revoke endpoint returned ${response.status}`);
 }
 
 // The id token comes straight from Google's token endpoint over TLS, so its

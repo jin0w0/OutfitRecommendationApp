@@ -35,3 +35,9 @@ export async function skipCalendarInvite() {
   await getAccount().dismissCalendarInvite(requestHeaders);
   redirect("/home");
 }
+
+export async function disconnectCalendar() {
+  const requestHeaders = await headers();
+  await getAccount().disconnectCalendar(requestHeaders);
+  redirect("/settings");
+}

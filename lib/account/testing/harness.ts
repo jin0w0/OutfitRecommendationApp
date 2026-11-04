@@ -1,12 +1,14 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGliteDialect } from "kysely-pglite-dialect";
 import { vi } from "vitest";
-import { createAccount } from "../account";
+import { createAccount, type AccountConfig } from "../account";
 import { FakeGoogle } from "./fake-google";
 
 export const TEST_BASE_URL = "http://localhost:3000";
 
-export async function createTestAccount() {
+export async function createTestAccount(
+  options: Pick<AccountConfig, "onCalendarDisconnected"> = {},
+) {
   const google = new FakeGoogle();
   vi.stubGlobal("fetch", google.fetch);
 
@@ -17,6 +19,7 @@ export async function createTestAccount() {
     secret: "test-secret-that-is-at-least-32-characters",
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
     tokenEncryptionKey: "test-token-encryption-key",
+    ...options,
   });
   await account.migrate();
 

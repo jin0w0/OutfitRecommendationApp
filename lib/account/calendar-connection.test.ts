@@ -288,3 +288,91 @@ describe("reconnecting", () => {
     ]);
   });
 });
+
+describe("disconnecting", () => {
+  async function connectedToSchool(options?: Parameters<typeof createTestAccount>[0]) {
+    const harness = await createTestAccount(options);
+    harness.google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    harness.google.addAccount({ email: "minji@kangnam.ac.kr", name: "김민지(학교)" });
+    const { headers } = await harness.signInWithGoogle("minji@gmail.com");
+    await harness.connectCalendar(headers, "minji@kangnam.ac.kr");
+    const user = await harness.account.getCurrentUser(headers);
+    return { ...harness, headers, userId: user!.id };
+  }
+
+  test("disconnecting removes the connection and revokes the app's Google access", async () => {
+    const { account, google, headers, userId } = await connectedToSchool();
+
+    await account.disconnectCalendar(headers);
+
+    expect((await account.getCurrentUser(headers))?.calendarConnection).toBeNull();
+    expect(await account.getCalendarAccessToken(userId)).toEqual({ status: "not-connected" });
+    expect(await account.getSelectedCalendarIds(userId)).toEqual([]);
+    expect(google.isAppAuthorized("minji@kangnam.ac.kr")).toBe(false);
+  });
+
+  test("disconnecting still completes when Google's revocation fails", async () => {
+    const { account, google, headers } = await connectedToSchool();
+    google.failRevocations();
+
+    await account.disconnectCalendar(headers);
+
+    expect((await account.getCurrentUser(headers))?.calendarConnection).toBeNull();
+  });
+
+  test("another user's connection to the same Google account keeps working", async () => {
+    const { account, google, headers, connectCalendar, signInWithGoogle } =
+      await connectedToSchool();
+    google.addAccount({ email: "jun@gmail.com", name: "이준" });
+    const { headers: jun } = await signInWithGoogle("jun@gmail.com");
+    await connectCalendar(jun, "minji@kangnam.ac.kr");
+    const junId = (await account.getCurrentUser(jun))!.id;
+
+    await account.disconnectCalendar(headers);
+
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 60 * 1000 });
+    const token = await account.getCalendarAccessToken(junId);
+    vi.useRealTimers();
+    expect(token.status).toBe("ok");
+  });
+
+  test("disconnecting a calendar that is also the login account keeps the user signed in", async () => {
+    const { account, headers, connectCalendar } = await connectedToSchool();
+    await connectCalendar(headers, "minji@gmail.com");
+
+    await account.disconnectCalendar(headers);
+
+    expect(await account.getCurrentUser(headers)).toMatchObject({
+      email: "minji@gmail.com",
+      calendarConnection: null,
+    });
+  });
+
+  test("registered cleanup runs when a calendar is disconnected", async () => {
+    const cleaned: string[] = [];
+    const { account, headers, userId } = await connectedToSchool({
+      onCalendarDisconnected: async (id) => void cleaned.push(id),
+    });
+
+    await account.disconnectCalendar(headers);
+
+    expect(cleaned).toEqual([userId]);
+  });
+
+  test("switching to another Google account follows the same rules as disconnecting", async () => {
+    const cleaned: string[] = [];
+    const { account, google, headers, userId, connectCalendar } = await connectedToSchool({
+      onCalendarDisconnected: async (id) => void cleaned.push(id),
+    });
+    google.addAccount({ email: "club@gmail.com", name: "동아리" });
+
+    await connectCalendar(headers, "club@gmail.com");
+
+    expect((await account.getCurrentUser(headers))?.calendarConnection?.email).toBe(
+      "club@gmail.com",
+    );
+    expect(google.isAppAuthorized("minji@kangnam.ac.kr")).toBe(false);
+    expect(cleaned).toEqual([userId]);
+    expect(await account.getSelectedCalendarIds(userId)).toEqual(["club@gmail.com"]);
+  });
+});
