@@ -6,6 +6,7 @@ import {
   createCalendarConnections,
   type CalendarConnectionSummary,
 } from "./calendar-connection.ts";
+import { revokeToken } from "./google-oauth.ts";
 import { findRegion, type Region } from "./regions.ts";
 
 export type AccountConfig = {
@@ -17,6 +18,8 @@ export type AccountConfig = {
   tokenEncryptionKey: string;
   // Lets other features clear data tied to a 캘린더 연동 when it goes away.
   onCalendarDisconnected?: (userId: string) => Promise<void>;
+  // Lets other features delete their data for a user who 탈퇴s.
+  onAccountDeleted?: (userId: string) => Promise<void>;
   plugins?: BetterAuthPlugin[];
 };
 
@@ -78,6 +81,17 @@ export function createAccount(config: AccountConfig) {
   async function markCalendarInviteSeen(userId: string) {
     const context = await auth.$context;
     await context.internalAdapter.updateUser(userId, { calendarInviteSeen: true });
+  }
+
+  async function revokeLoginAccess(userId: string, accountId: string) {
+    try {
+      const { accessToken } = await auth.api.getAccessToken({
+        body: { accountId, userId },
+      });
+      if (accessToken) await revokeToken(accessToken);
+    } catch (error) {
+      console.error("Could not revoke Google sign-in access", error);
+    }
   }
 
   async function requireSession(headers: Headers) {
@@ -153,6 +167,26 @@ export function createAccount(config: AccountConfig) {
     async disconnectCalendar(headers: Headers) {
       const { user } = await requireSession(headers);
       await calendar.disconnect(user.id);
+    },
+
+    // 탈퇴: revoke Google access, let other features delete their data, then
+    // remove the user with every session and sign-in link. Revocation failures
+    // never stop the deletion.
+    async deleteAccount(headers: Headers) {
+      const { user } = await requireSession(headers);
+      const context = await auth.$context;
+
+      await calendar.disconnect(user.id);
+      for (const login of await context.internalAdapter.findAccounts(user.id)) {
+        if (await calendar.connectedByOthers(login.accountId, user.id)) continue;
+        await revokeLoginAccess(user.id, login.id);
+      }
+      await config.onAccountDeleted?.(user.id);
+
+      await auth.api.signOut({ headers });
+      await context.internalAdapter.deleteUserSessions(user.id);
+      await context.internalAdapter.deleteAccounts(user.id);
+      await context.internalAdapter.deleteUser(user.id);
     },
 
     // For server-side callers (the calendar adapter) that already know the user.

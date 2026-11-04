@@ -7,7 +7,7 @@ import { FakeGoogle } from "./fake-google";
 export const TEST_BASE_URL = "http://localhost:3000";
 
 export async function createTestAccount(
-  options: Pick<AccountConfig, "onCalendarDisconnected"> = {},
+  options: Pick<AccountConfig, "onCalendarDisconnected" | "onAccountDeleted"> = {},
 ) {
   const google = new FakeGoogle();
   vi.stubGlobal("fetch", google.fetch);

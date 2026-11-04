@@ -5,6 +5,7 @@ import { getAccount } from "@/lib/account/server";
 import { signOutEverywhere } from "../actions";
 import { RegionForm } from "../region-form";
 import { CalendarSection } from "./calendar-section";
+import { DeleteAccountSection } from "./delete-account";
 
 export default function Settings({ searchParams }: PageProps<"/settings">) {
   return (
@@ -37,6 +38,7 @@ async function SettingsSections({ searchParams }: Pick<PageProps<"/settings">, "
         notice={typeof calendar === "string" ? calendar : undefined}
       />
       <LoginSection email={user.email} />
+      <DeleteAccountSection />
     </>
   );
 }

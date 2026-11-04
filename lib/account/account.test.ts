@@ -134,3 +134,81 @@ describe("sign out", () => {
     expect(await account.getCurrentUser(someoneElse.headers)).not.toBeNull();
   });
 });
+
+describe("deleting the account", () => {
+  async function minjiWithCalendar(options?: Parameters<typeof createTestAccount>[0]) {
+    const harness = await createTestAccount(options);
+    harness.google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    harness.google.addAccount({ email: "minji@kangnam.ac.kr", name: "김민지(학교)" });
+    const laptop = await harness.signInWithGoogle("minji@gmail.com");
+    const phone = await harness.signInWithGoogle("minji@gmail.com");
+    await harness.account.setHomeRegion(laptop.headers, "gyeonggi");
+    await harness.connectCalendar(laptop.headers, "minji@kangnam.ac.kr");
+    const userId = (await harness.account.getCurrentUser(laptop.headers))!.id;
+    return { ...harness, laptop: laptop.headers, phone: phone.headers, userId };
+  }
+
+  test("deleting signs the user out everywhere", async () => {
+    const { account, laptop, phone } = await minjiWithCalendar();
+
+    await account.deleteAccount(laptop);
+
+    expect(await account.getCurrentUser(laptop)).toBeNull();
+    expect(await account.getCurrentUser(phone)).toBeNull();
+  });
+
+  test("deleting revokes Google access for both the login and the calendar account", async () => {
+    const { account, google, laptop } = await minjiWithCalendar();
+
+    await account.deleteAccount(laptop);
+
+    expect(google.isAppAuthorized("minji@gmail.com")).toBe(false);
+    expect(google.isAppAuthorized("minji@kangnam.ac.kr")).toBe(false);
+  });
+
+  test("deleting still completes when Google's revocation fails", async () => {
+    const { account, google, laptop, phone } = await minjiWithCalendar();
+    google.failRevocations();
+
+    await account.deleteAccount(laptop);
+
+    expect(await account.getCurrentUser(phone)).toBeNull();
+  });
+
+  test("signing in again with the same Google account starts a fresh user", async () => {
+    const { account, laptop, userId, signInWithGoogle } = await minjiWithCalendar();
+
+    await account.deleteAccount(laptop);
+    const again = await signInWithGoogle("minji@gmail.com");
+
+    const fresh = await account.getCurrentUser(again.headers);
+    expect(fresh?.id).not.toBe(userId);
+    expect(fresh).toMatchObject({ homeRegion: null, calendarConnection: null });
+    expect(await account.getCalendarAccessToken(userId)).toEqual({ status: "not-connected" });
+  });
+
+  test("registered cleanup runs for the deleted user", async () => {
+    const deleted: string[] = [];
+    const { account, laptop, userId } = await minjiWithCalendar({
+      onAccountDeleted: async (id) => void deleted.push(id),
+    });
+
+    await account.deleteAccount(laptop);
+
+    expect(deleted).toEqual([userId]);
+  });
+
+  test("a login account that someone else uses as their calendar is not revoked", async () => {
+    const { account, google, laptop, connectCalendar, signInWithGoogle } =
+      await minjiWithCalendar();
+    google.addAccount({ email: "jun@gmail.com", name: "이준" });
+    const { headers: jun } = await signInWithGoogle("jun@gmail.com");
+    await connectCalendar(jun, "minji@gmail.com");
+
+    await account.deleteAccount(laptop);
+
+    const junId = (await account.getCurrentUser(jun))!.id;
+    expect((await account.getCalendarAccessToken(junId)).status).toBe("ok");
+    expect(google.isAppAuthorized("minji@gmail.com")).toBe(true);
+  });
+});

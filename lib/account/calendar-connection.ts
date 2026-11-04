@@ -206,6 +206,10 @@ export function createCalendarConnections({
 
     selectedCalendarIds: (userId: string) => selectedIds(userId),
 
+    // Whether revoking this Google account would cut off someone else's
+    // 캘린더 연동.
+    connectedByOthers,
+
     async disconnect(userId: string) {
       const connection = await db
         .deleteFrom("calendar_connection")
@@ -233,13 +237,7 @@ export function createCalendarConnections({
   // same Google account connected, because Google revokes the whole account's
   // authorization for this app, not just one token.
   async function release(connection: Tables["calendar_connection"]) {
-    const stillShared = await db
-      .selectFrom("calendar_connection")
-      .select("user_id")
-      .where("google_id", "=", connection.google_id)
-      .where("user_id", "!=", connection.user_id)
-      .executeTakeFirst();
-    if (!stillShared) {
+    if (!(await connectedByOthers(connection.google_id, connection.user_id))) {
       try {
         await revokeToken(await decrypt(connection.refresh_token));
       } catch (error) {
@@ -248,6 +246,16 @@ export function createCalendarConnections({
       }
     }
     await onDisconnected(connection.user_id);
+  }
+
+  async function connectedByOthers(googleId: string, exceptUserId: string) {
+    const other = await db
+      .selectFrom("calendar_connection")
+      .select("user_id")
+      .where("google_id", "=", googleId)
+      .where("user_id", "!=", exceptUserId)
+      .executeTakeFirst();
+    return other !== undefined;
   }
 
   // The connected account's calendars, or null once Google refuses access.

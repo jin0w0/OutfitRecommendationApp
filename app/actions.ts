@@ -41,3 +41,9 @@ export async function disconnectCalendar() {
   await getAccount().disconnectCalendar(requestHeaders);
   redirect("/settings");
 }
+
+export async function deleteAccount() {
+  const requestHeaders = await headers();
+  await getAccount().deleteAccount(requestHeaders);
+  redirect("/");
+}

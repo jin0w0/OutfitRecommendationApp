@@ -16,7 +16,8 @@ type GoogleAccount = GoogleProfile & { sub: string; calendars: FakeCalendar[] };
 type Grant = {
   account: GoogleAccount;
   scope: string;
-  refreshToken: string;
+  // Google issues a refresh token only when offline access was requested.
+  refreshToken: string | null;
   revoked: boolean;
 };
 
@@ -26,8 +27,8 @@ const CALENDAR_LIST_ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/
 
 export class FakeGoogle {
   private accounts = new Map<string, GoogleAccount>();
-  private pendingCodes = new Map<string, { account: GoogleAccount; scope: string }>();
-  private grants = new Map<string, Grant>();
+  private pendingCodes = new Map<string, { account: GoogleAccount; scope: string; offline: boolean }>();
+  private grants = new Set<Grant>();
   private accessTokens = new Map<string, Grant>();
   private counter = 0;
   private revocationsFail = false;
@@ -47,23 +48,27 @@ export class FakeGoogle {
   approve(authorizationURL: string, email: string) {
     const account = this.accounts.get(email);
     if (!account) throw new Error(`No fake Google account for ${email}`);
-    const scope = new URL(authorizationURL).searchParams.get("scope") ?? "";
+    const params = new URL(authorizationURL).searchParams;
     const code = `code-${++this.counter}`;
-    this.pendingCodes.set(code, { account, scope });
+    this.pendingCodes.set(code, {
+      account,
+      scope: params.get("scope") ?? "",
+      offline: params.get("access_type") === "offline",
+    });
     return code;
   }
 
   // The user removes the app from their Google account settings (or, in
   // Testing mode, the 7-day refresh-token lifetime runs out).
   revokeAccessFromGoogle(email: string) {
-    for (const grant of this.grants.values()) {
+    for (const grant of this.grants) {
       if (grant.account.email === email) grant.revoked = true;
     }
   }
 
   // Whether the account still has a live grant for this app.
   isAppAuthorized(email: string) {
-    return [...this.grants.values()].some((g) => g.account.email === email && !g.revoked);
+    return [...this.grants].some((g) => g.account.email === email && !g.revoked);
   }
 
   failRevocations() {
@@ -86,7 +91,7 @@ export class FakeGoogle {
   private async token(request: Request) {
     const body = new URLSearchParams(await request.text());
     if (body.get("grant_type") === "refresh_token") {
-      const grant = this.grants.get(body.get("refresh_token") ?? "");
+      const grant = this.grantForRefreshToken(body.get("refresh_token") ?? "");
       if (!grant || grant.revoked) return Response.json({ error: "invalid_grant" }, { status: 400 });
       return Response.json({
         access_token: this.issueAccessToken(grant),
@@ -103,13 +108,13 @@ export class FakeGoogle {
     if (!pending) return Response.json({ error: "invalid_grant" }, { status: 400 });
     this.pendingCodes.delete(body.get("code")!);
 
-    const refreshToken = `refresh-${++this.counter}`;
-    const grant = { ...pending, refreshToken, revoked: false };
-    this.grants.set(refreshToken, grant);
+    const refreshToken = pending.offline ? `refresh-${++this.counter}` : null;
+    const grant = { account: pending.account, scope: pending.scope, refreshToken, revoked: false };
+    this.grants.add(grant);
 
     return Response.json({
       access_token: this.issueAccessToken(grant),
-      refresh_token: refreshToken,
+      ...(refreshToken && { refresh_token: refreshToken }),
       expires_in: 3600,
       token_type: "Bearer",
       scope: pending.scope,
@@ -122,7 +127,7 @@ export class FakeGoogle {
   private async revoke(request: Request) {
     if (this.revocationsFail) return new Response("unavailable", { status: 503 });
     const token = new URLSearchParams(await request.text()).get("token") ?? "";
-    const grant = this.grants.get(token) ?? this.accessTokens.get(token);
+    const grant = this.grantForRefreshToken(token) ?? this.accessTokens.get(token);
     if (!grant) return Response.json({ error: "invalid_token" }, { status: 400 });
     this.revokeAccessFromGoogle(grant.account.email);
     return new Response(null, { status: 200 });
@@ -133,6 +138,10 @@ export class FakeGoogle {
     const grant = this.accessTokens.get(accessToken);
     if (!grant || grant.revoked) return Response.json({ error: "unauthorized" }, { status: 401 });
     return Response.json({ items: grant.account.calendars });
+  }
+
+  private grantForRefreshToken(refreshToken: string) {
+    return [...this.grants].find((g) => g.refreshToken === refreshToken);
   }
 
   private issueAccessToken(grant: Grant) {
