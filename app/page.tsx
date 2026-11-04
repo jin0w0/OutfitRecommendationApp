@@ -35,8 +35,9 @@ async function SignIn({ searchParams }: Pick<PageProps<"/">, "searchParams">) {
 }
 
 // Only same-site paths, so the sign-in link can't bounce users elsewhere.
+// Browsers read "//x" and "/\x" as another host, so both are refused.
 function safeReturnPath(next: string | string[] | undefined) {
-  if (typeof next === "string" && next.startsWith("/") && !next.startsWith("//")) {
+  if (typeof next === "string" && next.startsWith("/") && !/^\/[/\\]/.test(next)) {
     return next;
   }
   return "/home";
