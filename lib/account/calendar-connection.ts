@@ -11,6 +11,7 @@ import {
   refreshTokens,
   type GoogleClient,
 } from "./google-oauth.ts";
+import { listGoogleCalendars } from "./google-calendar.ts";
 
 type Tables = {
   calendar_connection: {
@@ -22,6 +23,10 @@ type Tables = {
     access_token_expires_at: Date;
     status: "connected" | "reconnect-needed";
     updated_at: Date;
+  };
+  calendar_selection: {
+    user_id: string;
+    calendar_id: string;
   };
   calendar_connection_request: {
     state: string;
@@ -41,6 +46,13 @@ export type CalendarAccessToken =
   | { status: "ok"; accessToken: string }
   | { status: "not-connected" }
   | { status: "reconnect-needed" };
+
+export type CalendarChoice = {
+  id: string;
+  name: string;
+  primary: boolean;
+  selected: boolean;
+};
 
 export type CompletedConnection =
   | { status: "connected"; returnTo: string }
@@ -78,6 +90,15 @@ export function createCalendarConnections({
         .addColumn("access_token_expires_at", "timestamptz", (c) => c.notNull())
         .addColumn("status", "text", (c) => c.notNull())
         .addColumn("updated_at", "timestamptz", (c) => c.notNull().defaultTo(sql`now()`))
+        .execute();
+      await db.schema
+        .createTable("calendar_selection")
+        .ifNotExists()
+        .addColumn("user_id", "text", (c) =>
+          c.notNull().references("user.id").onDelete("cascade"),
+        )
+        .addColumn("calendar_id", "text", (c) => c.notNull())
+        .addPrimaryKeyConstraint("calendar_selection_pk", ["user_id", "calendar_id"])
         .execute();
       await db.schema
         .createTable("calendar_connection_request")
@@ -132,6 +153,11 @@ export function createCalendarConnections({
       }
 
       const { googleId, email } = identityFromIdToken(tokens.idToken);
+      const previous = await db
+        .selectFrom("calendar_connection")
+        .select("google_id")
+        .where("user_id", "=", userId)
+        .executeTakeFirst();
       const values = {
         google_id: googleId,
         email,
@@ -146,8 +172,31 @@ export function createCalendarConnections({
         .values({ user_id: userId, ...values })
         .onConflict((oc) => oc.column("user_id").doUpdateSet(values))
         .execute();
+
+      // A newly picked Google account starts with just its primary calendar.
+      if (previous?.google_id !== googleId) {
+        const primary = (await listGoogleCalendars(tokens.accessToken)).filter((c) => c.primary);
+        await replaceSelection(userId, primary.map((c) => c.id));
+      }
       return { status: "connected", returnTo };
     },
+
+    async listCalendars(userId: string): Promise<CalendarChoice[]> {
+      const calendars = await listGoogleCalendars(await requireAccessToken(userId));
+      const selected = new Set(await selectedIds(userId));
+      return calendars.map((c) => ({ ...c, selected: selected.has(c.id) }));
+    },
+
+    async selectCalendars(userId: string, calendarIds: string[]) {
+      const available = new Set(
+        (await listGoogleCalendars(await requireAccessToken(userId))).map((c) => c.id),
+      );
+      const unknown = calendarIds.filter((id) => !available.has(id));
+      if (unknown.length > 0) throw new Error(`Not in the connected account: ${unknown.join(", ")}`);
+      await replaceSelection(userId, calendarIds);
+    },
+
+    selectedCalendarIds: (userId: string) => selectedIds(userId),
 
     async summary(userId: string): Promise<CalendarConnectionSummary | null> {
       const row = await db
@@ -158,40 +207,69 @@ export function createCalendarConnections({
       return row ?? null;
     },
 
-    async accessToken(userId: string): Promise<CalendarAccessToken> {
-      const row = await db
-        .selectFrom("calendar_connection")
-        .selectAll()
-        .where("user_id", "=", userId)
-        .executeTakeFirst();
-      if (!row) return { status: "not-connected" };
-      if (row.status === "reconnect-needed") return { status: "reconnect-needed" };
+    accessToken,
+  };
 
-      if (row.access_token_expires_at.getTime() - EXPIRY_MARGIN_MS > Date.now()) {
-        return { status: "ok", accessToken: await decrypt(row.access_token) };
-      }
+  async function requireAccessToken(userId: string) {
+    const token = await accessToken(userId);
+    if (token.status !== "ok") throw new Error(`Calendar not available: ${token.status}`);
+    return token.accessToken;
+  }
 
-      const refreshed = await refreshTokens(google, await decrypt(row.refresh_token));
-      if (!refreshed) {
-        await db
-          .updateTable("calendar_connection")
-          .set({ status: "reconnect-needed", updated_at: new Date() })
-          .where("user_id", "=", userId)
-          .execute();
-        return { status: "reconnect-needed" };
-      }
+  async function selectedIds(userId: string) {
+    const rows = await db
+      .selectFrom("calendar_selection")
+      .select("calendar_id")
+      .where("user_id", "=", userId)
+      .orderBy("calendar_id")
+      .execute();
+    return rows.map((row) => row.calendar_id);
+  }
+
+  async function replaceSelection(userId: string, calendarIds: string[]) {
+    await db.transaction().execute(async (trx) => {
+      await trx.deleteFrom("calendar_selection").where("user_id", "=", userId).execute();
+      if (calendarIds.length === 0) return;
+      await trx
+        .insertInto("calendar_selection")
+        .values(calendarIds.map((calendar_id) => ({ user_id: userId, calendar_id })))
+        .execute();
+    });
+  }
+
+  async function accessToken(userId: string): Promise<CalendarAccessToken> {
+    const row = await db
+      .selectFrom("calendar_connection")
+      .selectAll()
+      .where("user_id", "=", userId)
+      .executeTakeFirst();
+    if (!row) return { status: "not-connected" };
+    if (row.status === "reconnect-needed") return { status: "reconnect-needed" };
+
+    if (row.access_token_expires_at.getTime() - EXPIRY_MARGIN_MS > Date.now()) {
+      return { status: "ok", accessToken: await decrypt(row.access_token) };
+    }
+
+    const refreshed = await refreshTokens(google, await decrypt(row.refresh_token));
+    if (!refreshed) {
       await db
         .updateTable("calendar_connection")
-        .set({
-          access_token: await encrypt(refreshed.accessToken),
-          // Google may rotate the refresh token; keep the newest one.
-          ...(refreshed.refreshToken && { refresh_token: await encrypt(refreshed.refreshToken) }),
-          access_token_expires_at: refreshed.expiresAt,
-          updated_at: new Date(),
-        })
+        .set({ status: "reconnect-needed", updated_at: new Date() })
         .where("user_id", "=", userId)
         .execute();
-      return { status: "ok", accessToken: refreshed.accessToken };
-    },
-  };
+      return { status: "reconnect-needed" };
+    }
+    await db
+      .updateTable("calendar_connection")
+      .set({
+        access_token: await encrypt(refreshed.accessToken),
+        // Google may rotate the refresh token; keep the newest one.
+        ...(refreshed.refreshToken && { refresh_token: await encrypt(refreshed.refreshToken) }),
+        access_token_expires_at: refreshed.expiresAt,
+        updated_at: new Date(),
+      })
+      .where("user_id", "=", userId)
+      .execute();
+    return { status: "ok", accessToken: refreshed.accessToken };
+  }
 }

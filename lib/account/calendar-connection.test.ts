@@ -137,3 +137,53 @@ describe("calendar connection", () => {
     expect(await account.getCalendarAccessToken(user!.id)).toEqual({ status: "not-connected" });
   });
 });
+
+describe("calendar selection", () => {
+  async function connectedWithCalendars() {
+    const harness = await createTestAccount();
+    harness.google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    harness.google.addAccount({
+      email: "minji@kangnam.ac.kr",
+      name: "김민지(학교)",
+      calendars: [
+        { id: "minji@kangnam.ac.kr", summary: "김민지", primary: true },
+        { id: "timetable", summary: "수업 시간표" },
+        { id: "ko.south_korea#holiday", summary: "대한민국의 휴일" },
+      ],
+    });
+    const { headers } = await harness.signInWithGoogle("minji@gmail.com");
+    await harness.connectCalendar(headers, "minji@kangnam.ac.kr");
+    return { ...harness, headers };
+  }
+
+  test("right after connecting, only the primary calendar is selected", async () => {
+    const { account, headers } = await connectedWithCalendars();
+
+    expect(await account.listCalendars(headers)).toEqual([
+      { id: "minji@kangnam.ac.kr", name: "김민지", primary: true, selected: true },
+      { id: "timetable", name: "수업 시간표", primary: false, selected: false },
+      { id: "ko.south_korea#holiday", name: "대한민국의 휴일", primary: false, selected: false },
+    ]);
+  });
+
+  test("the user can change which calendars are read", async () => {
+    const { account, headers } = await connectedWithCalendars();
+
+    await account.selectCalendars(headers, ["minji@kangnam.ac.kr", "timetable"]);
+
+    const user = await account.getCurrentUser(headers);
+    expect(await account.getSelectedCalendarIds(user!.id)).toEqual([
+      "minji@kangnam.ac.kr",
+      "timetable",
+    ]);
+  });
+
+  test("a calendar that is not in the connected account cannot be selected", async () => {
+    const { account, headers } = await connectedWithCalendars();
+
+    await expect(account.selectCalendars(headers, ["someone-elses-calendar"])).rejects.toThrow();
+
+    const user = await account.getCurrentUser(headers);
+    expect(await account.getSelectedCalendarIds(user!.id)).toEqual(["minji@kangnam.ac.kr"]);
+  });
+});

@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import type { CurrentUser } from "@/lib/account/account";
+import { CalendarChoices } from "./calendar-choices";
 
 const MESSAGES: Record<string, string> = {
   cancelled: "캘린더 연동을 취소했어요.",
@@ -24,6 +26,11 @@ export function CalendarSection({
         <p role="alert" className="text-sm text-red-600">
           {MESSAGES[notice]}
         </p>
+      )}
+      {connection?.status === "connected" && (
+        <Suspense fallback={<p className="text-sm text-zinc-500">캘린더 목록을 불러오는 중…</p>}>
+          <CalendarChoices />
+        </Suspense>
       )}
       {!connection && (
         // A plain link: the route redirects the browser to Google.

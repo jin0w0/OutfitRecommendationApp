@@ -115,8 +115,19 @@ export function createAccount(config: AccountConfig) {
       return calendar.complete(user.id, callbackParams);
     },
 
+    async listCalendars(headers: Headers) {
+      const { user } = await requireSession(headers);
+      return calendar.listCalendars(user.id);
+    },
+
+    async selectCalendars(headers: Headers, calendarIds: string[]) {
+      const { user } = await requireSession(headers);
+      await calendar.selectCalendars(user.id, calendarIds);
+    },
+
     // For server-side callers (the calendar adapter) that already know the user.
     getCalendarAccessToken: (userId: string) => calendar.accessToken(userId),
+    getSelectedCalendarIds: (userId: string) => calendar.selectedCalendarIds(userId),
 
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });

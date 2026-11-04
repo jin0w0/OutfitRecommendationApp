@@ -1,13 +1,17 @@
 // Stands in for Google's OAuth and Calendar HTTP endpoints, so tests run the
 // real Better Auth sign-in and linking flows without the network.
 
+export type FakeCalendar = { id: string; summary: string; primary?: boolean };
+
 export type GoogleProfile = {
   email: string;
   name: string;
   picture?: string;
+  // Defaults to a single primary calendar named after the account.
+  calendars?: FakeCalendar[];
 };
 
-type GoogleAccount = GoogleProfile & { sub: string };
+type GoogleAccount = GoogleProfile & { sub: string; calendars: FakeCalendar[] };
 
 type Grant = {
   account: GoogleAccount;
@@ -17,6 +21,7 @@ type Grant = {
 };
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const CALENDAR_LIST_ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/calendarList";
 
 export class FakeGoogle {
   private accounts = new Map<string, GoogleAccount>();
@@ -26,7 +31,11 @@ export class FakeGoogle {
   private counter = 0;
 
   addAccount(profile: GoogleProfile) {
-    const account = { ...profile, sub: `google-${++this.counter}` };
+    const account = {
+      ...profile,
+      sub: `google-${++this.counter}`,
+      calendars: profile.calendars ?? [{ id: profile.email, summary: profile.name, primary: true }],
+    };
     this.accounts.set(profile.email, account);
     return account;
   }
@@ -50,6 +59,7 @@ export class FakeGoogle {
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
     if (request.url === TOKEN_ENDPOINT) return this.token(request);
+    if (request.url === CALENDAR_LIST_ENDPOINT) return this.calendarList(request);
     throw new Error(`FakeGoogle: unexpected request to ${request.url}`);
   };
 
@@ -85,6 +95,13 @@ export class FakeGoogle {
       scope: pending.scope,
       id_token: unsignedIdToken(pending.account),
     });
+  }
+
+  private calendarList(request: Request) {
+    const accessToken = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+    const grant = this.accessTokens.get(accessToken);
+    if (!grant || grant.revoked) return Response.json({ error: "unauthorized" }, { status: 401 });
+    return Response.json({ items: grant.account.calendars });
   }
 
   private issueAccessToken(grant: Grant) {
