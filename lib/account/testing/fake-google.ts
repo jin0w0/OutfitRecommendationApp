@@ -22,6 +22,7 @@ export class FakeGoogle {
   private accounts = new Map<string, GoogleAccount>();
   private pendingCodes = new Map<string, { account: GoogleAccount; scope: string }>();
   private grants = new Map<string, Grant>();
+  private accessTokens = new Map<string, Grant>();
   private counter = 0;
 
   addAccount(profile: GoogleProfile) {
@@ -41,6 +42,11 @@ export class FakeGoogle {
     return code;
   }
 
+  // Which Google account an access token was issued for, or null if unknown.
+  ownerOfAccessToken(accessToken: string) {
+    return this.accessTokens.get(accessToken)?.account.email ?? null;
+  }
+
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
     if (request.url === TOKEN_ENDPOINT) return this.token(request);
@@ -49,6 +55,16 @@ export class FakeGoogle {
 
   private async token(request: Request) {
     const body = new URLSearchParams(await request.text());
+    if (body.get("grant_type") === "refresh_token") {
+      const grant = this.grants.get(body.get("refresh_token") ?? "");
+      if (!grant || grant.revoked) return Response.json({ error: "invalid_grant" }, { status: 400 });
+      return Response.json({
+        access_token: this.issueAccessToken(grant),
+        expires_in: 3600,
+        token_type: "Bearer",
+        scope: grant.scope,
+      });
+    }
     if (body.get("grant_type") !== "authorization_code") {
       return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
     }
@@ -58,16 +74,23 @@ export class FakeGoogle {
     this.pendingCodes.delete(body.get("code")!);
 
     const refreshToken = `refresh-${++this.counter}`;
-    this.grants.set(refreshToken, { ...pending, refreshToken, revoked: false });
+    const grant = { ...pending, refreshToken, revoked: false };
+    this.grants.set(refreshToken, grant);
 
     return Response.json({
-      access_token: `access-${++this.counter}`,
+      access_token: this.issueAccessToken(grant),
       refresh_token: refreshToken,
       expires_in: 3600,
       token_type: "Bearer",
       scope: pending.scope,
       id_token: unsignedIdToken(pending.account),
     });
+  }
+
+  private issueAccessToken(grant: Grant) {
+    const accessToken = `access-${++this.counter}`;
+    this.accessTokens.set(accessToken, grant);
+    return accessToken;
   }
 }
 

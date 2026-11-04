@@ -13,6 +13,7 @@ const account = createAccount({
     clientId: process.env.GOOGLE_CLIENT_ID ?? "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   },
+  tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY ?? "",
 });
 
 await account.migrate();

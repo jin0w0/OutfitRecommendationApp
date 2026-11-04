@@ -25,6 +25,7 @@ export function getAccount(): Account {
       clientId: env("GOOGLE_CLIENT_ID"),
       clientSecret: env("GOOGLE_CLIENT_SECRET"),
     },
+    tokenEncryptionKey: env("TOKEN_ENCRYPTION_KEY"),
     // Lets server actions set and clear the session cookie.
     plugins: [nextCookies()],
   });

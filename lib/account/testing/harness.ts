@@ -16,6 +16,7 @@ export async function createTestAccount() {
     baseURL: TEST_BASE_URL,
     secret: "test-secret-that-is-at-least-32-characters",
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
+    tokenEncryptionKey: "test-token-encryption-key",
   });
   await account.migrate();
 
@@ -47,6 +48,19 @@ export async function createTestAccount() {
     };
   }
 
+  // Runs "캘린더 연동" for a signed-in browser: start, approve on the fake
+  // consent screen as `email`, and hand the callback back to the account module.
+  async function connectCalendar(headers: Headers, email: string, { returnTo = "/settings" } = {}) {
+    const authorizationURL = await account.startCalendarConnection(headers, returnTo);
+    const code = google.approve(authorizationURL, email);
+    const state = new URL(authorizationURL).searchParams.get("state")!;
+    const result = await account.completeCalendarConnection(
+      headers,
+      new URLSearchParams({ code, state }),
+    );
+    return { ...result, authorizationURL };
+  }
+
   // A cookie jar that talks to the account module's handler.
   class Browser {
     private cookies = new Map<string, string>();
@@ -69,5 +83,5 @@ export async function createTestAccount() {
     }
   }
 
-  return { account, google, signInWithGoogle, Browser };
+  return { account, google, signInWithGoogle, connectCalendar, Browser };
 }

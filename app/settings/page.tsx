@@ -4,19 +4,21 @@ import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import { signOutEverywhere } from "../actions";
 import { RegionForm } from "../region-form";
+import { CalendarSection } from "./calendar-section";
 
-export default function Settings() {
+export default function Settings({ searchParams }: PageProps<"/settings">) {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-10 px-6 py-12">
       <h1 className="text-2xl font-semibold">설정</h1>
       <Suspense fallback={null}>
-        <SettingsSections />
+        <SettingsSections searchParams={searchParams} />
       </Suspense>
     </main>
   );
 }
 
-async function SettingsSections() {
+async function SettingsSections({ searchParams }: Pick<PageProps<"/settings">, "searchParams">) {
+  const { calendar } = await searchParams;
   const requestHeaders = await headers();
   const user = await getAccount().getCurrentUser(requestHeaders);
   if (!user) redirect("/?next=/settings");
@@ -30,6 +32,10 @@ async function SettingsSections() {
         </p>
         <RegionForm current={user.homeRegion} next="/settings" submitLabel="저장" />
       </section>
+      <CalendarSection
+        connection={user.calendarConnection}
+        notice={typeof calendar === "string" ? calendar : undefined}
+      />
       <LoginSection email={user.email} />
     </>
   );

@@ -1,7 +1,11 @@
 import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import type { Dialect } from "kysely";
+import { Kysely, type Dialect } from "kysely";
 // Explicit extensions so scripts/migrate.ts can load this file with plain Node.
+import {
+  createCalendarConnections,
+  type CalendarConnectionSummary,
+} from "./calendar-connection.ts";
 import { findRegion, type Region } from "./regions.ts";
 
 export type AccountConfig = {
@@ -9,6 +13,8 @@ export type AccountConfig = {
   baseURL: string;
   secret: string;
   google: { clientId: string; clientSecret: string };
+  // Encrypts the 캘린더 연동 tokens at rest.
+  tokenEncryptionKey: string;
   plugins?: BetterAuthPlugin[];
 };
 
@@ -21,6 +27,7 @@ export type CurrentUser = {
   image: string | null;
   homeRegion: Region | null;
   needsOnboarding: boolean;
+  calendarConnection: CalendarConnectionSummary | null;
 };
 
 export function createAccount(config: AccountConfig) {
@@ -47,6 +54,15 @@ export function createAccount(config: AccountConfig) {
   } satisfies BetterAuthOptions;
 
   const auth = betterAuth(options);
+  const calendar = createCalendarConnections({
+    db: new Kysely({ dialect: config.dialect }),
+    google: {
+      clientId: config.google.clientId,
+      clientSecret: config.google.clientSecret,
+      redirectURI: `${config.baseURL}/api/calendar/callback`,
+    },
+    encryptionKey: config.tokenEncryptionKey,
+  });
 
   async function requireSession(headers: Headers) {
     const session = await auth.api.getSession({ headers });
@@ -60,6 +76,7 @@ export function createAccount(config: AccountConfig) {
     async migrate() {
       const { runMigrations } = await getMigrations(options);
       await runMigrations();
+      await calendar.migrate();
     },
 
     async getCurrentUser(headers: Headers): Promise<CurrentUser | null> {
@@ -74,6 +91,7 @@ export function createAccount(config: AccountConfig) {
         image: image ?? null,
         homeRegion,
         needsOnboarding: homeRegion === null,
+        calendarConnection: await calendar.summary(id),
       };
     },
 
@@ -84,6 +102,21 @@ export function createAccount(config: AccountConfig) {
       const context = await auth.$context;
       await context.internalAdapter.updateUser(user.id, { homeRegion: region.id });
     },
+
+    // Returns the Google consent URL to send the browser to. `returnTo` is
+    // where the callback lands afterwards.
+    async startCalendarConnection(headers: Headers, returnTo: string) {
+      const { user } = await requireSession(headers);
+      return calendar.start(user.id, returnTo);
+    },
+
+    async completeCalendarConnection(headers: Headers, callbackParams: URLSearchParams) {
+      const { user } = await requireSession(headers);
+      return calendar.complete(user.id, callbackParams);
+    },
+
+    // For server-side callers (the calendar adapter) that already know the user.
+    getCalendarAccessToken: (userId: string) => calendar.accessToken(userId),
 
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });
