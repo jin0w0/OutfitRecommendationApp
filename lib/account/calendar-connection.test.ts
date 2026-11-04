@@ -223,3 +223,68 @@ describe("calendar invite during onboarding", () => {
     expect((await account.getCurrentUser(headers))?.shouldInviteCalendar).toBe(false);
   });
 });
+
+describe("reconnecting", () => {
+  async function connectedToSchoolCalendars() {
+    const harness = await createTestAccount();
+    harness.google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    harness.google.addAccount({
+      email: "minji@kangnam.ac.kr",
+      name: "김민지(학교)",
+      calendars: [
+        { id: "minji@kangnam.ac.kr", summary: "김민지", primary: true },
+        { id: "timetable", summary: "수업 시간표" },
+      ],
+    });
+    const { headers } = await harness.signInWithGoogle("minji@gmail.com");
+    await harness.connectCalendar(headers, "minji@kangnam.ac.kr");
+    const user = await harness.account.getCurrentUser(headers);
+    return { ...harness, headers, userId: user!.id };
+  }
+
+  const twoHoursLater = () =>
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 60 * 1000 });
+
+  test("when the refresh token stops working, the connection needs reconnecting", async () => {
+    const { account, google, headers, userId } = await connectedToSchoolCalendars();
+    google.revokeAccessFromGoogle("minji@kangnam.ac.kr");
+
+    twoHoursLater();
+    const token = await account.getCalendarAccessToken(userId);
+    vi.useRealTimers();
+
+    expect(token).toEqual({ status: "reconnect-needed" });
+    expect((await account.getCurrentUser(headers))?.calendarConnection).toEqual({
+      email: "minji@kangnam.ac.kr",
+      status: "reconnect-needed",
+    });
+  });
+
+  test("access revoked in Google settings is noticed when the calendars are read", async () => {
+    const { account, google, headers } = await connectedToSchoolCalendars();
+    google.revokeAccessFromGoogle("minji@kangnam.ac.kr");
+
+    expect(await account.listCalendars(headers)).toEqual([]);
+    expect((await account.getCurrentUser(headers))?.calendarConnection?.status).toBe(
+      "reconnect-needed",
+    );
+  });
+
+  test("reconnecting the same account restores the connection and keeps the chosen calendars", async () => {
+    const { account, google, headers, userId, connectCalendar } = await connectedToSchoolCalendars();
+    await account.selectCalendars(headers, ["minji@kangnam.ac.kr", "timetable"]);
+    google.revokeAccessFromGoogle("minji@kangnam.ac.kr");
+    twoHoursLater();
+    await account.getCalendarAccessToken(userId);
+    vi.useRealTimers();
+
+    await connectCalendar(headers, "minji@kangnam.ac.kr");
+
+    expect((await account.getCurrentUser(headers))?.calendarConnection?.status).toBe("connected");
+    expect((await account.getCalendarAccessToken(userId)).status).toBe("ok");
+    expect(await account.getSelectedCalendarIds(userId)).toEqual([
+      "minji@kangnam.ac.kr",
+      "timetable",
+    ]);
+  });
+});

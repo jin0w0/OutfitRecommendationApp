@@ -51,6 +51,14 @@ export class FakeGoogle {
     return code;
   }
 
+  // The user removes the app from their Google account settings (or, in
+  // Testing mode, the 7-day refresh-token lifetime runs out).
+  revokeAccessFromGoogle(email: string) {
+    for (const grant of this.grants.values()) {
+      if (grant.account.email === email) grant.revoked = true;
+    }
+  }
+
   // Which Google account an access token was issued for, or null if unknown.
   ownerOfAccessToken(accessToken: string) {
     return this.accessTokens.get(accessToken)?.account.email ?? null;

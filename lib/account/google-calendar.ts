@@ -4,10 +4,12 @@ const CALENDAR_LIST_ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/
 
 export type GoogleCalendar = { id: string; name: string; primary: boolean };
 
-export async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendar[]> {
+// null means Google no longer accepts the token (access was revoked).
+export async function listGoogleCalendars(accessToken: string): Promise<GoogleCalendar[] | null> {
   const response = await fetch(CALENDAR_LIST_ENDPOINT, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
+  if (response.status === 401) return null;
   if (!response.ok) throw new Error(`Google calendar list returned ${response.status}`);
   const body = (await response.json()) as {
     items: { id: string; summary: string; summaryOverride?: string; primary?: boolean }[];

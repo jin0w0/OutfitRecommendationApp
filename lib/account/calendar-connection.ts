@@ -175,22 +175,24 @@ export function createCalendarConnections({
 
       // A newly picked Google account starts with just its primary calendar.
       if (previous?.google_id !== googleId) {
-        const primary = (await listGoogleCalendars(tokens.accessToken)).filter((c) => c.primary);
+        const calendars = (await listGoogleCalendars(tokens.accessToken)) ?? [];
+        const primary = calendars.filter((c) => c.primary);
         await replaceSelection(userId, primary.map((c) => c.id));
       }
       return { status: "connected", returnTo };
     },
 
     async listCalendars(userId: string): Promise<CalendarChoice[]> {
-      const calendars = await listGoogleCalendars(await requireAccessToken(userId));
+      const calendars = await readGoogleCalendars(userId);
+      if (!calendars) return [];
       const selected = new Set(await selectedIds(userId));
       return calendars.map((c) => ({ ...c, selected: selected.has(c.id) }));
     },
 
     async selectCalendars(userId: string, calendarIds: string[]) {
-      const available = new Set(
-        (await listGoogleCalendars(await requireAccessToken(userId))).map((c) => c.id),
-      );
+      const calendars = await readGoogleCalendars(userId);
+      if (!calendars) throw new Error("Calendar access was revoked");
+      const available = new Set(calendars.map((c) => c.id));
       const unknown = calendarIds.filter((id) => !available.has(id));
       if (unknown.length > 0) throw new Error(`Not in the connected account: ${unknown.join(", ")}`);
       await replaceSelection(userId, calendarIds);
@@ -210,10 +212,21 @@ export function createCalendarConnections({
     accessToken,
   };
 
-  async function requireAccessToken(userId: string) {
+  // The connected account's calendars, or null once Google refuses access.
+  async function readGoogleCalendars(userId: string) {
     const token = await accessToken(userId);
-    if (token.status !== "ok") throw new Error(`Calendar not available: ${token.status}`);
-    return token.accessToken;
+    if (token.status !== "ok") return null;
+    const calendars = await listGoogleCalendars(token.accessToken);
+    if (!calendars) await markReconnectNeeded(userId);
+    return calendars;
+  }
+
+  async function markReconnectNeeded(userId: string) {
+    await db
+      .updateTable("calendar_connection")
+      .set({ status: "reconnect-needed", updated_at: new Date() })
+      .where("user_id", "=", userId)
+      .execute();
   }
 
   async function selectedIds(userId: string) {
@@ -252,11 +265,7 @@ export function createCalendarConnections({
 
     const refreshed = await refreshTokens(google, await decrypt(row.refresh_token));
     if (!refreshed) {
-      await db
-        .updateTable("calendar_connection")
-        .set({ status: "reconnect-needed", updated_at: new Date() })
-        .where("user_id", "=", userId)
-        .execute();
+      await markReconnectNeeded(userId);
       return { status: "reconnect-needed" };
     }
     await db

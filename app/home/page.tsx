@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import { signOut } from "../actions";
+import { ReconnectNotice } from "../reconnect-notice";
 
 export default function Home() {
   return (
@@ -21,20 +22,25 @@ async function UserBar() {
   if (user.needsOnboarding || user.shouldInviteCalendar) redirect("/onboarding");
 
   return (
-    <header className="flex items-center gap-3">
-      {user.image && (
-        // eslint-disable-next-line @next/next/no-img-element -- Google avatar URL
-        <img src={user.image} alt="" className="h-10 w-10 rounded-full" />
+    <>
+      <header className="flex items-center gap-3">
+        {user.image && (
+          // eslint-disable-next-line @next/next/no-img-element -- Google avatar URL
+          <img src={user.image} alt="" className="h-10 w-10 rounded-full" />
+        )}
+        <span className="flex-1 font-medium">{user.name}</span>
+        <a href="/settings" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+          설정
+        </a>
+        <form action={signOut}>
+          <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+            로그아웃
+          </button>
+        </form>
+      </header>
+      {user.calendarConnection?.status === "reconnect-needed" && (
+        <ReconnectNotice returnTo="/home" />
       )}
-      <span className="flex-1 font-medium">{user.name}</span>
-      <a href="/settings" className="text-sm text-zinc-600 underline dark:text-zinc-400">
-        설정
-      </a>
-      <form action={signOut}>
-        <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
-          로그아웃
-        </button>
-      </form>
-    </header>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import type { CurrentUser } from "@/lib/account/account";
+import { ReconnectNotice } from "../reconnect-notice";
 import { CalendarChoices } from "./calendar-choices";
 
 const MESSAGES: Record<string, string> = {
@@ -27,6 +28,7 @@ export function CalendarSection({
           {MESSAGES[notice]}
         </p>
       )}
+      {connection?.status === "reconnect-needed" && <ReconnectNotice returnTo="/settings" />}
       {connection?.status === "connected" && (
         <Suspense fallback={<p className="text-sm text-zinc-500">캘린더 목록을 불러오는 중…</p>}>
           <CalendarChoices />
