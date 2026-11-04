@@ -56,6 +56,12 @@ export function createAccount(config: AccountConfig) {
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });
     },
+
+    // Other devices first, then this one, so this device's cookie is cleared too.
+    async signOutEverywhere(headers: Headers) {
+      await auth.api.revokeOtherSessions({ headers });
+      await auth.api.signOut({ headers });
+    },
   };
 }
 

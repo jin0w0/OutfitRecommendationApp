@@ -26,6 +26,9 @@ async function UserBar() {
         <img src={user.image} alt="" className="h-10 w-10 rounded-full" />
       )}
       <span className="flex-1 font-medium">{user.name}</span>
+      <a href="/settings" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+        설정
+      </a>
       <form action={signOut}>
         <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
           로그아웃

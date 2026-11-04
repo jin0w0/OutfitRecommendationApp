@@ -9,3 +9,9 @@ export async function signOut() {
   await getAccount().signOut(requestHeaders);
   redirect("/");
 }
+
+export async function signOutEverywhere() {
+  const requestHeaders = await headers();
+  await getAccount().signOutEverywhere(requestHeaders);
+  redirect("/");
+}

@@ -71,4 +71,19 @@ describe("sign out", () => {
     expect(await account.getCurrentUser(laptop.headers)).toBeNull();
     expect(await account.getCurrentUser(phone.headers)).not.toBeNull();
   });
+
+  test("signing out everywhere ends every session of that user only", async () => {
+    const { account, google, signInWithGoogle } = await createTestAccount();
+    google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    google.addAccount({ email: "jun@gmail.com", name: "이준" });
+    const laptop = await signInWithGoogle("minji@gmail.com");
+    const schoolPC = await signInWithGoogle("minji@gmail.com");
+    const someoneElse = await signInWithGoogle("jun@gmail.com");
+
+    await account.signOutEverywhere(laptop.headers);
+
+    expect(await account.getCurrentUser(laptop.headers)).toBeNull();
+    expect(await account.getCurrentUser(schoolPC.headers)).toBeNull();
+    expect(await account.getCurrentUser(someoneElse.headers)).not.toBeNull();
+  });
 });
