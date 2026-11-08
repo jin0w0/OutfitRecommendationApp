@@ -31,10 +31,13 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
       ? params.date
       : todayInKorea();
   const situation = isEventKind(params.situation) ? params.situation : null;
+  // 코디 already shown for this date (다시 추천받기), each as dot-joined clothing ids.
+  const shown = [params.shown ?? []].flat().map((outfit) => outfit.split("."));
   const recommendation = await getOutfitRecommender().recommendForDate({
     userId: user.id,
     date,
     situation,
+    shown,
   });
 
   return (
@@ -44,7 +47,7 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         <ReconnectNotice returnTo="/home" />
       )}
       <OutfitRequestForm date={date} situation={situation} />
-      <RecommendationView recommendation={recommendation} />
+      <RecommendationView recommendation={recommendation} situation={situation} shown={shown} />
     </>
   );
 }

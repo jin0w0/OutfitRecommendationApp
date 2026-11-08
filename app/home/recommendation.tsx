@@ -1,4 +1,5 @@
 import type { Outfit, Recommendation } from "@/lib/outfit/recommender";
+import { acceptOutfit, cancelAcceptance } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
 
@@ -49,12 +50,41 @@ export function OutfitRequestForm({
   );
 }
 
-export function RecommendationView({ recommendation }: { recommendation: Recommendation }) {
-  const { basis } = recommendation;
+export function RecommendationView({
+  recommendation,
+  situation,
+  shown,
+}: {
+  recommendation: Recommendation;
+  situation: EventKind | null;
+  // 코디 already shown for this date, as clothing ids.
+  shown: string[][];
+}) {
+  const { basis, date, accepted } = recommendation;
+  const hidden = (
+    <>
+      <input type="hidden" name="date" value={date} />
+      {situation && <input type="hidden" name="situation" value={situation} />}
+    </>
+  );
   return (
     <section className="flex flex-col gap-4">
+      {accepted && (
+        <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950">
+          <p className="text-sm font-medium">
+            {accepted.status === "worn" ? "이 날 입은 코디로 기록했어요" : "이 날 입을 계획으로 저장했어요"}
+          </p>
+          <p className="text-sm">{accepted.clothes.map((c) => c.name).join(", ")}</p>
+          <form action={cancelAcceptance}>
+            {hidden}
+            <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+              수락 취소
+            </button>
+          </form>
+        </div>
+      )}
       <h2 className="font-medium">
-        {recommendation.date} 코디
+        {date} 코디
         {basis && (
           <span className="ml-2 text-sm font-normal text-zinc-600 dark:text-zinc-400">
             {EVENT_KINDS[basis.kind].name} · {FORMALITY_NAMES[basis.formality]} 기준
@@ -62,19 +92,51 @@ export function RecommendationView({ recommendation }: { recommendation: Recomme
         )}
       </h2>
       {recommendation.status === "ok" ? (
-        <ul className="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-          {SLOT_ORDER.flatMap((slot) => {
-            const clothing = recommendation.outfit[slot];
-            if (!clothing) return [];
-            return (
-              <li key={slot} className="flex items-center gap-3 px-4 py-3">
-                <span className="w-14 text-sm text-zinc-500">{SLOT_NAMES[slot]}</span>
-                <span className="flex-1">{clothing.name}</span>
-                <span className="text-xs text-zinc-500">{FORMALITY_NAMES[clothing.formality]}</span>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <ul className="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+            {SLOT_ORDER.flatMap((slot) => {
+              const clothing = recommendation.outfit[slot];
+              if (!clothing) return [];
+              return (
+                <li key={slot} className="flex items-center gap-3 px-4 py-3">
+                  <span className="w-14 text-sm text-zinc-500">{SLOT_NAMES[slot]}</span>
+                  <span className="flex-1">{clothing.name}</span>
+                  <span className="text-xs text-zinc-500">{FORMALITY_NAMES[clothing.formality]}</span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex flex-wrap gap-3">
+            <form action={acceptOutfit}>
+              {hidden}
+              {Object.values(recommendation.outfit).map((clothing) => (
+                <input key={clothing.id} type="hidden" name="clothing" value={clothing.id} />
+              ))}
+              <button type="submit" className="h-10 rounded-full bg-foreground px-5 text-background">
+                입을게요
+              </button>
+            </form>
+            {/* Plain GET form: the 코디 shown so far live in the URL. */}
+            <form action="/home">
+              {hidden}
+              {[
+                ...new Set(
+                  [...shown, Object.values(recommendation.outfit).map((c) => c.id)].map((ids) =>
+                    ids.join("."),
+                  ),
+                ),
+              ].map((value) => (
+                <input key={value} type="hidden" name="shown" value={value} />
+              ))}
+              <button
+                type="submit"
+                className="h-10 rounded-full border border-zinc-300 px-5 dark:border-zinc-700"
+              >
+                다시 추천받기
+              </button>
+            </form>
+          </div>
+        </>
       ) : (
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           옷장에 {recommendation.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가)
