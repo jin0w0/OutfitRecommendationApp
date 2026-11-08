@@ -514,6 +514,24 @@ describe("캘린더 일정", () => {
     expect(result.weatherPlace).toBeNull();
   });
 
+  test.each([
+    ["names no known place", "우리 집", true],
+    ["has no 장소", null, false],
+  ])("when the 기준 일정 %s, the result says whether its 장소 could not be used for the weather", async (_, location, unknown) => {
+    const { recommender, calendar, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "스터디",
+      start: `${DATE}T19:00:00+09:00`,
+      end: `${DATE}T21:00:00+09:00`,
+      location,
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.missing.includes("unknown-place")).toBe(unknown);
+  });
+
   test("when the 연동 has expired the outfit comes without 일정, saying the calendar failed", async () => {
     const { recommender, calendar, weather, minji } = await connectedMinji();
     calendar.addEvent(minji, {

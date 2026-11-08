@@ -141,6 +141,8 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 // Information the recommendation had to go without.
 //   no-forecast: the date is outside the forecast range (날씨 미반영)
 //   weather-failed: the 날씨 어댑터 failed
+//   unknown-place: the 기준 일정's 장소 names no place the weather can be
+//     looked up for, so it is the 기본 지역's
 //   calendar-reconnect-needed: the 캘린더 연동 expired or was revoked, so the
 //     user should see the 재연동 안내
 //   calendar-failed: the 캘린더 어댑터 failed otherwise
@@ -153,6 +155,7 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 export type MissingInfo =
   | "no-forecast"
   | "weather-failed"
+  | "unknown-place"
   | "calendar-reconnect-needed"
   | "calendar-failed"
   | "llm-failed"
@@ -270,6 +273,7 @@ function dayOf(first: Step): Day {
 const DAY_MISSING: MissingInfo[] = [
   "no-forecast",
   "weather-failed",
+  "unknown-place",
   "calendar-reconnect-needed",
   "calendar-failed",
   "llm-failed",
@@ -425,6 +429,7 @@ export function createOutfitRecommender({
 
       // The 기준 일정's 장소 when it names a known place, else the 기본 지역.
       const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
+      if (baseEvent?.location && !place) missing.push("unknown-place");
       const { latitude, longitude } = place ?? location;
       let weather: Weather | null = null;
       try {

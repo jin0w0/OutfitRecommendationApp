@@ -442,19 +442,28 @@ function eventTime(event: DayEvent) {
   return `${time(event.start)}–${time(event.end)}`;
 }
 
-// The weather the 코디 was chosen for, or why it was not 반영.
+// The weather the 코디 was chosen for, or why it was not 반영, and whether the
+// 기준 일정's 장소 could not be used for it.
 function WeatherLine({
-  recommendation: { weather, weatherPlace, missing },
+  recommendation: { weather, weatherPlace, baseEvent, missing },
   regionName,
 }: {
   recommendation: Recommendation;
   regionName: string;
 }) {
+  const unknownPlace = missing.includes("unknown-place") && (
+    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      일정 장소 “{baseEvent?.location}”의 지역을 알 수 없어 {regionName} 날씨로 추천했어요.
+    </p>
+  );
   if (weather) {
     return (
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        {weatherPlace ?? regionName} 날씨 {weather.temperature}°C · {weather.rain ? "비 소식 있음" : "비 소식 없음"}
-      </p>
+      <>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {weatherPlace ?? regionName} 날씨 {weather.temperature}°C · {weather.rain ? "비 소식 있음" : "비 소식 없음"}
+        </p>
+        {unknownPlace}
+      </>
     );
   }
   return (
