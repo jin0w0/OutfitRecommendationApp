@@ -2,7 +2,7 @@
 // read-only, with the token and chosen calendars from the account module. Not
 // tested automatically; check it by hand with a connected Google account.
 import type { Account } from "@/lib/account/account";
-import type { CalendarEvent, CalendarSource } from "./recommender";
+import type { CalendarEvent, CalendarSource } from "./ports";
 
 const EVENTS_ENDPOINT = "https://www.googleapis.com/calendar/v3/calendars";
 const TIME_ZONE = "Asia/Seoul";

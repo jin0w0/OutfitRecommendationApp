@@ -1,7 +1,7 @@
 // The real 날씨 어댑터: 기상청 API허브's 단기예보 (VilageFcstInfoService_2.0/
 // getVilageFcst). Only its pure helpers are tested
 // automatically, without network; check the rest by hand with a real key.
-import type { Coordinates, Weather, WeatherSource } from "./recommender";
+import type { Coordinates, Weather, WeatherSource } from "./ports";
 
 const ENDPOINT =
   "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst";

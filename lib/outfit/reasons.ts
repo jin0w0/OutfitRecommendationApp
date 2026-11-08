@@ -1,6 +1,6 @@
 // Plain sentences for 추천 이유, made from their 근거 alone, for when the LLM
 // cannot write them.
-import type { Evidence } from "./recommender";
+import type { Evidence } from "./scoring";
 import { EVENT_KINDS, FORMALITY_NAMES } from "./situations";
 import type { Clothing, Style } from "./wardrobe";
 

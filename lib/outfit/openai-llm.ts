@@ -2,14 +2,8 @@
 // answer is JSON in a fixed schema. Not tested automatically; check it by hand
 // with OPENAI_API_KEY set.
 import OpenAI from "openai";
-import type {
-  EventJudgement,
-  EventText,
-  Evidence,
-  LanguageModel,
-  AskedCondition,
-  RevisionRequest,
-} from "./recommender";
+import type { EventJudgement, EventText, LanguageModel, AskedCondition, RevisionRequest } from "./ports";
+import type { Evidence } from "./scoring";
 import { EVENT_KINDS, isEventKind } from "./situations";
 import type { Formality } from "./wardrobe";
 
