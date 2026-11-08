@@ -85,7 +85,8 @@ export async function acceptOutfit(formData: FormData) {
   backHome(formData, date);
 }
 
-// 일정 판단 직접 고치기, then back to the date for a 코디 chosen with it.
+// 일정 판단 직접 고치기, then back to the 추천 세션, which goes on with a 코디
+// chosen with it; or, without one to go on, to the date for a new 추천.
 export async function correctEvent(formData: FormData) {
   const userId = await requireUserId();
   const date = dateFrom(formData);
@@ -95,7 +96,14 @@ export async function correctEvent(formData: FormData) {
   if (typeof eventId !== "string" || !eventId || !isEventKind(kind) || !isFormality(formality)) {
     throw new Error("Invalid 일정 correction");
   }
-  await getOutfitRecommender().correctEvent({ userId, eventId, judgement: { kind, formality } });
+  const session = formData.get("session");
+  const continued = await getOutfitRecommender().correctEvent({
+    userId,
+    eventId,
+    judgement: { kind, formality },
+    sessionId: typeof session === "string" && session ? session : undefined,
+  });
+  if (!continued) formData.delete("session");
   backHome(formData, date);
 }
 

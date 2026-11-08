@@ -235,6 +235,11 @@ const NEUTRAL_COLORS = new Set(["black", "white", "gray", "navy", "beige", "brow
 
 type RecommendationContext = {
   date: string;
+  // What 날짜로 추천받기 was asked for besides the date: the situation the
+  // user picked and where the 코디 is worn. Absent from steps stored before
+  // they were kept.
+  situation: EventKind | null;
+  location: Coordinates;
   // The day's 일정 from the calendars the user chose, in the order they happen.
   events: DayEvent[];
   // The 기준 일정 the 코디 is chosen for: the most formal of the day's 일정
@@ -252,25 +257,27 @@ type RecommendationContext = {
 };
 
 // What the day is, as 날짜로 추천받기 found it. Every 수정 in the session is
-// for the same day.
+// for the same day, until 일정 판단 직접 고치기 finds it again.
 type Day = Omit<RecommendationContext, "accepted">;
 
 // A 추천 세션 step as stored: the 추천 결과, which is a 수정 결과 unless
 // `revision` is null (날짜로 추천받기's).
 type Step = Chosen & { revision: Revision | null };
 
-// The day of a session's first step, as stored. The 기준 일정 is the one among
-// the day's 일정 again, as 날짜로 추천받기 returned it.
-function dayOf(first: Step): Day {
-  const { date, events, baseEvent, basis, weather, weatherPlace } = first;
+// The day of a session step, as stored. The 기준 일정 is the one among the
+// day's 일정 again, as it was returned.
+function dayOf(step: Step): Day {
+  const { date, situation, location, events, baseEvent, basis, weather, weatherPlace } = step;
   return {
     date,
+    situation,
+    location,
     events,
     baseEvent: baseEvent && (events.find((e) => e.calendarId === baseEvent.calendarId && e.id === baseEvent.id) ?? null),
     basis,
     weather,
     weatherPlace,
-    missing: first.missing.filter((m) => DAY_MISSING.includes(m)),
+    missing: step.missing.filter((m) => DAY_MISSING.includes(m)),
   };
 }
 
@@ -429,30 +436,9 @@ export function createOutfitRecommender({
       location: Coordinates;
       shown?: string[][];
     }): Promise<Recommendation> {
-      const missing: MissingInfo[] = [];
-      const calendarDay = await dayEvents(userId, date);
-      if (calendarDay.failure) missing.push(calendarDay.failure);
-      const { events, failed } = await judged(userId, calendarDay.events);
-      if (failed) missing.push("llm-failed");
-      const baseEvent = mostFormal(events) ?? events[0] ?? null;
-      const basis =
-        baseEvent?.judgement ??
-        (situation && { kind: situation, formality: EVENT_KINDS[situation].formality });
-
-      // The 기준 일정's 장소 when it names a known place, else the 기본 지역.
-      const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
-      if (baseEvent?.location && !place) missing.push("unknown-place");
-      const { latitude, longitude } = place ?? location;
-      let weather: Weather | null = null;
-      try {
-        weather = await weatherSource.forecast({ date, latitude, longitude });
-        if (!weather) missing.push("no-forecast");
-      } catch {
-        missing.push("weather-failed");
-      }
-      const day: Day = { date, events, baseEvent, basis, weather, weatherPlace: place?.name ?? null, missing };
+      const day = await findDay(userId, date, situation, location);
       const step = await recommend(userId, day, await wardrobe.clothes(userId), {
-        formality: basis?.formality ?? null,
+        formality: day.basis?.formality ?? null,
         conditions: [],
         shown,
       });
@@ -475,7 +461,6 @@ export function createOutfitRecommender({
     }): Promise<Recommendation> {
       const session = await sessions.get<Step>(userId, sessionId);
       if (!session) throw new Error("No such 추천 세션");
-      const first = session.steps[0];
       const last = session.steps.at(-1)!;
       // The latest step, left as it was.
       const unchanged = { ...last, sessionId, step: session.steps.length - 1 };
@@ -501,8 +486,8 @@ export function createOutfitRecommender({
       if (!asked.conditions.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
       const earlier = last.revision?.conditions ?? [];
       const conditions = accumulate(earlier, asked.conditions);
-      const day = dayOf(first);
-      const anchor = anchorFormality(first);
+      const day = dayOf(last);
+      const anchor = anchorFormality(day, session.steps[0]);
       // A 스타일 방향 that leaves the 격식 수준 where it is would change nothing.
       const style = asked.conditions.find((c) => c.type === "style");
       if (style && shifted(anchor, conditions) === shifted(anchor, earlier)) {
@@ -530,7 +515,7 @@ export function createOutfitRecommender({
         message,
         conditions,
         changes: changesBetween(last, step, conditions),
-        warnings: warningsFor(first, conditions),
+        warnings: warningsFor(day.basis, conditions),
       };
       await sessions.saveSteps<Step>(userId, sessionId, [...session.steps, { ...step, revision }]);
       return { ...step, sessionId, step: session.steps.length, revision, unapplied: null };
@@ -586,16 +571,41 @@ export function createOutfitRecommender({
 
     // 일정 판단 직접 고치기: from now on the user's 일정 `eventId` (a calendar
     // 일정 식별자) is taken to be `judgement`, whatever the LLM would say.
+    // In the 추천 세션 `sessionId`, the day is found again with the
+    // correction and its 코디 chosen anew under the 수정 조건 so far, as one
+    // more step; the steps before it can still be gone back to. Resolves to
+    // that step, or to null without a session to continue (none given, gone,
+    // or stored before sessions kept what the day was asked for).
     async correctEvent({
       userId,
       eventId,
       judgement,
+      sessionId,
     }: {
       userId: string;
       eventId: string;
       judgement: EventJudgement;
-    }) {
+      sessionId?: string;
+    }): Promise<Recommendation | null> {
       await eventCorrections.save(userId, eventId, judgement);
+      const session = sessionId && (await sessions.get<Step>(userId, sessionId));
+      if (!session) return null;
+      const last = session.steps.at(-1)!;
+      if (!last.location) return null;
+      const day = await findDay(userId, last.date, last.situation ?? null, last.location);
+      const conditions = last.revision?.conditions ?? [];
+      const step = await recommend(userId, day, await wardrobe.clothes(userId), {
+        formality: shifted(anchorFormality(day, session.steps[0]), conditions),
+        conditions,
+        shown: [],
+      });
+      const revision: Revision | null = last.revision && {
+        ...last.revision,
+        changes: changesBetween(last, step, conditions),
+        warnings: warningsFor(day.basis, conditions),
+      };
+      await sessions.saveSteps<Step>(userId, session.id, [...session.steps, { ...step, revision }]);
+      return { ...step, sessionId: session.id, step: session.steps.length, revision, unapplied: null };
     },
 
     // 수락 취소: forgets the 착용 기록 or plan for `date`.
@@ -603,6 +613,38 @@ export function createOutfitRecommender({
       await wearRecords.remove(userId, date);
     },
   };
+
+  // The day on `date`: its 일정 from the calendar, judged; the 기준 일정 and
+  // the basis the 코디 is chosen for (the picked `situation` without a judged
+  // 일정); and the weather where it is worn: at the 기준 일정's 장소 when it
+  // names a known place, else at `location` (the 기본 지역).
+  async function findDay(
+    userId: string,
+    date: string,
+    situation: EventKind | null,
+    location: Coordinates,
+  ): Promise<Day> {
+    const missing: MissingInfo[] = [];
+    const calendarDay = await dayEvents(userId, date);
+    if (calendarDay.failure) missing.push(calendarDay.failure);
+    const { events, failed } = await judged(userId, calendarDay.events);
+    if (failed) missing.push("llm-failed");
+    const baseEvent = mostFormal(events) ?? events[0] ?? null;
+    const basis =
+      baseEvent?.judgement ?? (situation && { kind: situation, formality: EVENT_KINDS[situation].formality });
+
+    const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
+    if (baseEvent?.location && !place) missing.push("unknown-place");
+    const { latitude, longitude } = place ?? location;
+    let weather: Weather | null = null;
+    try {
+      weather = await weatherSource.forecast({ date, latitude, longitude });
+      if (!weather) missing.push("no-forecast");
+    } catch {
+      missing.push("weather-failed");
+    }
+    return { date, situation, location, events, baseEvent, basis, weather, weatherPlace: place?.name ?? null, missing };
+  }
 
   // The best 코디 for the day from `wardrobeClothes`, chosen at `formality`
   // under the 수정 조건, and explained. Both entry points choose through this.
@@ -836,10 +878,10 @@ function accumulate(earlier: RevisionCondition[], asked: RevisionCondition[]) {
   return conditions;
 }
 
-// The 격식 수준 the session's first 코디 was chosen at: its 기준 일정's, or,
-// without one, the one most of that 코디 has.
-function anchorFormality(first: Step): Formality | null {
-  if (first.basis) return first.basis.formality;
+// The 격식 수준 a 스타일 방향 moves away from: the day's basis's, or, without
+// one, the one most of the session's first 코디 has.
+function anchorFormality(day: Day, first: Step): Formality | null {
+  if (day.basis) return day.basis.formality;
   if (first.status !== "ok") return null;
   const counts = new Map<Formality, number>();
   for (const { formality } of Object.values(first.outfit)) counts.set(formality, (counts.get(formality) ?? 0) + 1);
@@ -858,8 +900,7 @@ function shifted(formality: Formality | null, conditions: RevisionCondition[]): 
 // The 격식 충돌 of the 수정 조건 with the 일정 the session's 코디 is for: a
 // 스타일 방향 that moves the 코디 off its 격식 수준, and kept pieces of
 // another 격식 수준.
-function warningsFor(first: Step, conditions: RevisionCondition[]): RevisionWarning[] {
-  const { basis } = first;
+function warningsFor(basis: Basis | null, conditions: RevisionCondition[]): RevisionWarning[] {
   if (!basis) return [];
   const clashing = conditions.filter((c) => {
     if (c.type === "style") return shifted(basis.formality, [c]) !== basis.formality;

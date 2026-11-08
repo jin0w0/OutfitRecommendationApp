@@ -104,7 +104,7 @@ export function RecommendationView({
           </span>
         )}
       </h2>
-      <EventList recommendation={recommendation} hidden={hidden} />
+      <EventList recommendation={recommendation} hidden={inSession} />
       <WeatherLine recommendation={recommendation} regionName={regionName} />
       {revision && <RevisionSummary revision={revision} />}
       {recommendation.status === "ok" ? (
@@ -333,7 +333,7 @@ function EventList({
   hidden,
 }: {
   recommendation: Recommendation;
-  // The date and picked 일정 to come back to.
+  // The date, picked 일정 and 추천 세션 to come back to.
   hidden: ReactNode;
 }) {
   if (missing.includes("calendar-failed")) {
