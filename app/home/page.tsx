@@ -31,10 +31,13 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
       ? params.date
       : todayInKorea();
   const situation = isEventKind(params.situation) ? params.situation : null;
+  // Onboarding above guarantees a 기본 지역.
+  const { name: regionName, latitude, longitude } = user.homeRegion!;
   const recommendation = await getOutfitRecommender().recommendForDate({
     userId: user.id,
     date,
     situation,
+    location: { latitude, longitude },
   });
 
   return (
@@ -44,7 +47,7 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         <ReconnectNotice returnTo="/home" />
       )}
       <OutfitRequestForm date={date} situation={situation} />
-      <RecommendationView recommendation={recommendation} />
+      <RecommendationView recommendation={recommendation} regionName={regionName} />
     </>
   );
 }
