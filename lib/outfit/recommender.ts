@@ -56,20 +56,41 @@ export type CalendarSource = {
   >;
 };
 
+// What the LLM is told about one 일정: only what judging it needs. Never its
+// 참석자, id or time.
+export type EventText = { title: string; description: string | null; location: string | null };
+
+// The 일정의 종류 and 격식 수준 judged for one 일정.
+export type EventJudgement = { kind: EventKind; formality: Formality };
+
+// The LLM 어댑터. Every method takes and returns structured data, and rejects
+// when the LLM could not answer.
+export type LanguageModel = {
+  // One judgement per 일정, in the same order.
+  judgeEvents(events: EventText[]): Promise<EventJudgement[]>;
+};
+
+// One of the day's 일정 with what was judged of it, or null when it could not
+// be judged.
+export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
+
 // Information the recommendation had to go without.
 //   no-forecast: the date is outside the forecast range (날씨 미반영)
 //   weather-failed: the 날씨 어댑터 failed
 //   calendar-reconnect-needed: the 캘린더 연동 expired or was revoked, so the
 //     user should see the 재연동 안내
 //   calendar-failed: the 캘린더 어댑터 failed otherwise
+//   llm-failed: the LLM could not judge the day's 일정, so the 코디 follows
+//     the situation the user picked, or none
 export type MissingInfo =
   | "no-forecast"
   | "weather-failed"
   | "calendar-reconnect-needed"
-  | "calendar-failed";
+  | "calendar-failed"
+  | "llm-failed";
 
 // The 일정 the 코디 is chosen for: its 일정의 종류 and 격식 수준.
-export type Basis = { kind: EventKind; formality: Formality };
+export type Basis = EventJudgement;
 
 // 0..1 per factor. A factor that did not apply (e.g. 일정 with 일정 없음) is absent.
 // `recency` is low for clothes worn in the last few days (최근 착용 기록);
@@ -109,9 +130,11 @@ const NEUTRAL_COLORS = new Set(["black", "white", "gray", "navy", "beige", "brow
 type RecommendationContext = {
   date: string;
   // The day's 일정 from the calendars the user chose, in the order they happen.
-  events: CalendarEvent[];
-  // The 기준 일정 the 코디 is chosen for, or null without any 일정.
-  baseEvent: CalendarEvent | null;
+  events: DayEvent[];
+  // The 기준 일정 the 코디 is chosen for: the most formal of the day's 일정
+  // (the earliest of equals), or the first when they could not be judged.
+  // Null without any 일정.
+  baseEvent: DayEvent | null;
   basis: Basis | null;
   // The weather the 코디 was chosen for, or null when it was not 반영.
   weather: Weather | null;
@@ -133,6 +156,10 @@ export type Recommendation = RecommendationContext &
     | { status: "unbuildable"; missingSlots: Slot[] }
   );
 
+// How much of the 일정 score a piece loses when it is two 격식 수준 off every
+// other 일정 of the day. Less than a level's worth, so the 기준 일정 comes first.
+const OTHER_EVENT_PENALTY = 0.25;
+
 // Below this 기온 (°C) the 코디 gets an 아우터.
 const OUTER_BELOW = 17;
 
@@ -142,12 +169,14 @@ export function createOutfitRecommender({
   wardrobe,
   weather: weatherSource,
   calendar,
+  llm,
   wearRecords,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "preferences">;
   weather: WeatherSource;
   calendar: CalendarSource;
+  llm: LanguageModel;
   wearRecords: WearRecords;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
@@ -174,8 +203,25 @@ export function createOutfitRecommender({
     }
   }
 
+  // The day's 일정, each with its 일정의 종류 and 격식 수준 as the LLM judged
+  // them, or all unjudged when it could not.
+  async function judged(events: CalendarEvent[]): Promise<{ events: DayEvent[]; failed: boolean }> {
+    if (!events.length) return { events: [], failed: false };
+    try {
+      const judgements = await llm.judgeEvents(
+        events.map(({ title, description, location }) => ({ title, description, location })),
+      );
+      if (judgements.length !== events.length) throw new Error("A judgement per 일정 was expected");
+      return { events: events.map((event, i) => ({ ...event, judgement: judgements[i] })), failed: false };
+    } catch {
+      return { events: events.map((event) => ({ ...event, judgement: null })), failed: true };
+    }
+  }
+
   return {
-    // 날짜로 추천받기. `situation` is the 일정 the user picked, or null for 일정 없음.
+    // 날짜로 추천받기. The 코디 is chosen for the 기준 일정 among the day's
+    // 일정. Without any judged 일정 it is chosen for `situation`, the 일정 the
+    // user picked, or for 일정 없음 when that is null.
     // For 다시 추천받기, `shown` lists the 코디 (as clothing ids) already shown
     // for this date; the best other 코디 is chosen when the 옷장 has one.
     async recommendForDate({
@@ -193,11 +239,15 @@ export function createOutfitRecommender({
       location: Coordinates;
       shown?: string[][];
     }): Promise<Recommendation> {
-      const basis = situation && { kind: situation, formality: EVENT_KINDS[situation].formality };
       const missing: MissingInfo[] = [];
-      const { events, failure } = await dayEvents(userId, date);
-      if (failure) missing.push(failure);
-      const baseEvent = events[0] ?? null;
+      const day = await dayEvents(userId, date);
+      if (day.failure) missing.push(day.failure);
+      const { events, failed } = await judged(day.events);
+      if (failed) missing.push("llm-failed");
+      const baseEvent = mostFormal(events) ?? events[0] ?? null;
+      const basis =
+        baseEvent?.judgement ??
+        (situation && { kind: situation, formality: EVENT_KINDS[situation].formality });
 
       // The 기준 일정's 장소 when it names a known place, else the 기본 지역.
       const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
@@ -220,6 +270,10 @@ export function createOutfitRecommender({
         : null;
       const context = { date, events, baseEvent, basis, weather, weatherPlace, missing, accepted };
 
+      // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
+      const otherFormalities = events.flatMap((event) =>
+        event !== baseEvent && event.judgement ? [event.judgement.formality] : [],
+      );
       const clothes = suitableClothes(wardrobeClothes, basis);
       const preferences = await wardrobe.preferences(userId);
       const daysSinceWorn = await daysSinceLastWorn(userId, date);
@@ -230,7 +284,7 @@ export function createOutfitRecommender({
       const best = maxBy(
         (unshown.length ? unshown : candidates).map((outfit) => ({
           outfit,
-          scores: score(outfit, basis, weather, preferences, daysSinceWorn),
+          scores: score(outfit, basis, otherFormalities, weather, preferences, daysSinceWorn),
         })),
         ({ scores }) => total(scores),
       );
@@ -292,6 +346,17 @@ function byStart(a: CalendarEvent, b: CalendarEvent) {
   return key(a) - key(b) || 0;
 }
 
+// The judged 일정 with the highest 격식 수준, the earliest of equals.
+function mostFormal(events: DayEvent[]) {
+  let best: DayEvent | undefined;
+  for (const event of events) {
+    if (!event.judgement) continue;
+    const level = FORMALITY_LEVEL[event.judgement.formality];
+    if (!best || level > FORMALITY_LEVEL[best.judgement!.formality]) best = event;
+  }
+  return best;
+}
+
 // Per slot, the clothes that match the 일정's 격식 수준, falling back to those
 // one level off. Clothes two levels off are never worn to it.
 function suitableClothes(clothes: Clothing[], basis: Basis | null) {
@@ -310,6 +375,7 @@ function suitableClothes(clothes: Clothing[], basis: Basis | null) {
 function score(
   outfit: Outfit,
   basis: Basis | null,
+  otherFormalities: Formality[],
   weather: Weather | null,
   preferences: Preferences,
   daysSinceWorn: Map<string, number>,
@@ -324,12 +390,23 @@ function score(
     utilization: average(items.map((c) => Math.min(days(c), LONG_UNWORN_DAYS) / LONG_UNWORN_DAYS)),
   };
   if (basis) {
-    scores.event = average(items.map((c) => (c.formality === basis.formality ? 1 : 0)));
+    scores.event = average(items.map((c) => eventFit(c, basis, otherFormalities)));
   }
   if (weather) {
     scores.weather = average(items.map((c) => weatherFit(c, weather)));
   }
   return scores;
+}
+
+// How well one piece suits the day's 일정: full marks at the 기준 일정's 격식
+// 수준, half one level off, less the further it is two levels off the day's
+// other 일정.
+function eventFit(clothing: Clothing, basis: Basis, otherFormalities: Formality[]) {
+  const level = FORMALITY_LEVEL[clothing.formality];
+  const fit = 1 - Math.abs(level - FORMALITY_LEVEL[basis.formality]) / 2;
+  if (!otherFormalities.length) return fit;
+  const farOff = otherFormalities.filter((f) => Math.abs(level - FORMALITY_LEVEL[f]) >= 2).length;
+  return Math.max(0, fit - (OTHER_EVENT_PENALTY * farOff) / otherFormalities.length);
 }
 
 // How well one piece suits the day: its 두께 against the 기온, and, on a rainy

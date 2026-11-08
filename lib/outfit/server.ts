@@ -4,14 +4,20 @@ import { Pool } from "pg";
 import { getAccount } from "@/lib/account/server";
 import { createGoogleCalendarEvents } from "./google-calendar-events";
 import { createKmaWeather } from "./kma-weather";
-import { createOutfitRecommender, type OutfitRecommender, type WeatherSource } from "./recommender";
+import { createOpenAiLanguageModel } from "./openai-llm";
+import {
+  createOutfitRecommender,
+  type LanguageModel,
+  type OutfitRecommender,
+  type WeatherSource,
+} from "./recommender";
 import { createWardrobe } from "./wardrobe";
 import { createWearRecords } from "./wear-records";
 
 let instance: OutfitRecommender | undefined;
 
 // The app's single 코디 추천 module, over the 옷장 and 착용 기록 in Neon, the
-// 기상청 단기예보 and the user's Google Calendar. Built on first use so that
+// 기상청 단기예보, the user's Google Calendar and OpenAI. Built on first use so that
 // `next build` does not need the secrets.
 export function getOutfitRecommender(): OutfitRecommender {
   const connectionString = process.env.DATABASE_URL;
@@ -22,6 +28,7 @@ export function getOutfitRecommender(): OutfitRecommender {
       wardrobe: createWardrobe({ dialect }),
       weather: weatherSource(),
       calendar: createGoogleCalendarEvents(getAccount()),
+      llm: languageModel(),
       wearRecords: createWearRecords({ dialect }),
     });
   }
@@ -36,6 +43,18 @@ function weatherSource(): WeatherSource {
   return {
     async forecast() {
       throw new Error("Missing environment variable KMA_AUTH_KEY");
+    },
+  };
+}
+
+// Without a key every LLM call fails, so recommendations go on without the
+// 일정 judged and say so.
+function languageModel(): LanguageModel {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey) return createOpenAiLanguageModel({ apiKey, model: process.env.OPENAI_MODEL || undefined });
+  return {
+    async judgeEvents() {
+      throw new Error("Missing environment variable OPENAI_API_KEY");
     },
   };
 }

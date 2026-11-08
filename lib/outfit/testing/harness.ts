@@ -4,6 +4,9 @@ import {
   type CalendarEvent,
   type CalendarSource,
   type CalendarStatus,
+  type EventJudgement,
+  type EventText,
+  type LanguageModel,
   type Weather,
   type WeatherSource,
 } from "../recommender";
@@ -22,10 +25,12 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   await wearRecords.migrate();
   const weather = new FakeWeather();
   const calendar = new FakeCalendar();
+  const llm = new FakeLanguageModel();
   const recommender = createOutfitRecommender({
     wardrobe,
     weather,
     calendar,
+    llm,
     wearRecords,
     today: () => today,
   });
@@ -64,7 +69,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     return added;
   }
 
-  return { wardrobe, weather, calendar, recommender, createUser, deleteAccount, addClothes };
+  return { wardrobe, weather, calendar, llm, recommender, createUser, deleteAccount, addClothes };
 }
 
 // Seoul, where the tests' users live.
@@ -150,5 +155,33 @@ class FakeCalendar implements CalendarSource {
       .filter((e) => e.userId === request.userId && e.calendarId === request.calendarId)
       .filter((e) => e.start.slice(0, 10) === request.date)
       .map(({ userId, ...event }) => (void userId, event));
+  }
+}
+
+// The LLM, answering only what the test prepared: an 일정 whose title has no
+// prepared judgement makes the whole call fail, as does `failWith`.
+class FakeLanguageModel implements LanguageModel {
+  private judgements = new Map<string, EventJudgement>();
+  private failure: Error | null = null;
+  // What each judgeEvents call was given.
+  judgeRequests: EventText[][] = [];
+
+  // 일정 titled `title` are judged as `judgement`.
+  judge(title: string, judgement: EventJudgement) {
+    this.judgements.set(title, judgement);
+  }
+
+  failWith(error = new Error("the LLM is down")) {
+    this.failure = error;
+  }
+
+  async judgeEvents(events: EventText[]) {
+    this.judgeRequests.push(events);
+    if (this.failure) throw this.failure;
+    return events.map(({ title }) => {
+      const judgement = this.judgements.get(title);
+      if (!judgement) throw new Error(`No judgement prepared for ${title}`);
+      return judgement;
+    });
   }
 }
