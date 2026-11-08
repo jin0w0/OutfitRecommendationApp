@@ -3,6 +3,7 @@
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import type { Clothing, Formality, Material, Preferences, Slot, Wardrobe } from "./wardrobe";
+import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 
 export type Outfit = {
@@ -171,6 +172,7 @@ export function createOutfitRecommender({
   calendar,
   llm,
   wearRecords,
+  eventCorrections,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "preferences">;
@@ -178,6 +180,7 @@ export function createOutfitRecommender({
   calendar: CalendarSource;
   llm: LanguageModel;
   wearRecords: WearRecords;
+  eventCorrections: EventCorrections;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
 }) {
@@ -203,19 +206,38 @@ export function createOutfitRecommender({
     }
   }
 
-  // The day's 일정, each with its 일정의 종류 and 격식 수준 as the LLM judged
-  // them, or all unjudged when it could not.
-  async function judged(events: CalendarEvent[]): Promise<{ events: DayEvent[]; failed: boolean }> {
+  // The day's 일정, each with its 일정의 종류 and 격식 수준 as the user
+  // corrected them or, for the rest, as the LLM judged them. Only uncorrected
+  // 일정 go to the LLM; they stay unjudged when it could not answer.
+  async function judged(
+    userId: string,
+    events: CalendarEvent[],
+  ): Promise<{ events: DayEvent[]; failed: boolean }> {
     if (!events.length) return { events: [], failed: false };
-    try {
-      const judgements = await llm.judgeEvents(
-        events.map(({ title, description, location }) => ({ title, description, location })),
-      );
-      if (judgements.length !== events.length) throw new Error("A judgement per 일정 was expected");
-      return { events: events.map((event, i) => ({ ...event, judgement: judgements[i] })), failed: false };
-    } catch {
-      return { events: events.map((event) => ({ ...event, judgement: null })), failed: true };
+    const corrections = await eventCorrections.forEvents(
+      userId,
+      events.map((event) => event.id),
+    );
+    const toJudge = events.filter((event) => !corrections.has(event.id));
+    let judgements: EventJudgement[] | null = [];
+    if (toJudge.length) {
+      try {
+        judgements = await llm.judgeEvents(
+          toJudge.map(({ title, description, location }) => ({ title, description, location })),
+        );
+        if (judgements.length !== toJudge.length) throw new Error("A judgement per 일정 was expected");
+      } catch {
+        judgements = null;
+      }
     }
+    const judgedById = new Map(toJudge.map((event, i) => [event.id, judgements?.[i] ?? null]));
+    return {
+      events: events.map((event) => ({
+        ...event,
+        judgement: corrections.get(event.id) ?? judgedById.get(event.id) ?? null,
+      })),
+      failed: judgements === null,
+    };
   }
 
   return {
@@ -242,7 +264,7 @@ export function createOutfitRecommender({
       const missing: MissingInfo[] = [];
       const day = await dayEvents(userId, date);
       if (day.failure) missing.push(day.failure);
-      const { events, failed } = await judged(day.events);
+      const { events, failed } = await judged(userId, day.events);
       if (failed) missing.push("llm-failed");
       const baseEvent = mostFormal(events) ?? events[0] ?? null;
       const basis =
@@ -303,6 +325,20 @@ export function createOutfitRecommender({
       }
       const status: WearStatus = date <= today() ? "worn" : "planned";
       await wearRecords.save(userId, { date, status, clothingIds });
+    },
+
+    // 일정 판단 직접 고치기: from now on the user's 일정 `eventId` (a calendar
+    // 일정 식별자) is taken to be `judgement`, whatever the LLM would say.
+    async correctEvent({
+      userId,
+      eventId,
+      judgement,
+    }: {
+      userId: string;
+      eventId: string;
+      judgement: EventJudgement;
+    }) {
+      await eventCorrections.save(userId, eventId, judgement);
     },
 
     // 수락 취소: forgets the 착용 기록 or plan for `date`.
