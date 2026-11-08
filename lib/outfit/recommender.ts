@@ -3,7 +3,7 @@
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
-import type { Clothing, Formality, Material, Preferences, Slot, Style, Wardrobe } from "./wardrobe";
+import type { Clothing, Formality, Material, Preferences, Season, Slot, Style, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
@@ -995,12 +995,26 @@ function eventFit(clothing: Clothing, formality: Formality, otherFormalities: Fo
   return Math.max(0, fit - (OTHER_EVENT_PENALTY * farOff) / otherFormalities.length);
 }
 
-// How well one piece suits the day: its 두께 against the 기온, and, on a rainy
-// day, whether its 소재 stands up to rain.
+// How well one piece suits the day: its 두께 against the 기온, halved when it
+// is not worn in the 계절 the 기온 is of, and, on a rainy day, whether its
+// 소재 stands up to rain.
 function weatherFit(clothing: Clothing, { temperature, rain }: Weather) {
   if (rain && RAIN_WEAK_MATERIALS.has(clothing.material)) return 0;
   const target = clothing.slot === "outer" ? outerWarmth(temperature) : baseWarmth(temperature);
-  return 1 - Math.abs(clothing.warmth - target) / 2;
+  const fit = 1 - Math.abs(clothing.warmth - target) / 2;
+  const seasons = seasonsOf(temperature);
+  const inSeason = !clothing.seasons.length || clothing.seasons.some((s) => seasons.includes(s));
+  return inSeason ? fit : fit / 2;
+}
+
+// The 계절 whose clothes suit the 기온 (°C). Neighbouring 계절 overlap, so
+// clothes of either suit the days between them.
+function seasonsOf(temperature: number): Season[] {
+  const seasons: Season[] = [];
+  if (temperature >= 20) seasons.push("summer");
+  if (temperature >= 8 && temperature < 23) seasons.push("spring", "autumn");
+  if (temperature < 12) seasons.push("winter");
+  return seasons;
 }
 
 // The 두께 that suits the 기온 for what is worn under any 아우터.

@@ -261,6 +261,31 @@ describe("날씨", () => {
     expect(result).toMatchObject({ status: "ok", outfit: { outer: coat } });
   });
 
+  test("on a rainy 6°C day a winter long padding is chosen over a thin spring-and-autumn denim jacket", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , , , padding] = await addClothes(minji, [
+      { name: "맨투맨", slot: "top", color: "gray" },
+      { name: "청바지", slot: "bottom", color: "blue", material: "denim" },
+      { name: "흰 운동화", slot: "shoes", color: "white", material: "leather" },
+      // Added first, so it would win any tie.
+      {
+        name: "데님 재킷",
+        slot: "outer",
+        color: "blue",
+        seasons: ["spring", "autumn"],
+        warmth: 1,
+        material: "denim",
+      },
+      { name: "검정 롱패딩", slot: "outer", color: "black", seasons: ["winter"], warmth: 3, material: "synthetic" },
+    ]);
+    weather.setForecast(DATE, { temperature: 6, rain: true });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", outfit: { outer: padding } });
+  });
+
   test("on a 25°C day there is no outer and thin clothes are chosen", async () => {
     const { recommender, weather, createUser, addClothes } = await createTestOutfit();
     const minji = await createUser("minji@gmail.com");
