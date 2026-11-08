@@ -1,12 +1,14 @@
-// Creates or updates the account tables in the database at DATABASE_URL.
+// Creates or updates the account and 옷장 tables in the database at DATABASE_URL.
 // Run with: npm run db:migrate
 import { PostgresDialect } from "kysely";
 import pg from "pg";
 import { createAccount } from "../lib/account/account.ts";
+import { createWardrobe } from "../lib/outfit/wardrobe.ts";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const dialect = new PostgresDialect({ pool });
 const account = createAccount({
-  dialect: new PostgresDialect({ pool }),
+  dialect,
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
   secret: process.env.BETTER_AUTH_SECRET ?? "",
   google: {
@@ -17,5 +19,7 @@ const account = createAccount({
 });
 
 await account.migrate();
+// After the account tables, since clothes belong to a user.
+await createWardrobe({ dialect }).migrate();
 await pool.end();
-console.log("Account tables are up to date.");
+console.log("Account and 옷장 tables are up to date.");

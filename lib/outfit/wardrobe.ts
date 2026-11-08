@@ -1,0 +1,124 @@
+// The 옷장 store: every user's clothes and their color/style preferences, in
+// Postgres next to the account tables.
+import { randomUUID } from "node:crypto";
+import { Kysely, sql, type Dialect, type Generated, type JSONColumnType } from "kysely";
+
+export type Slot = "top" | "bottom" | "dress" | "outer" | "shoes";
+export type Season = "spring" | "summer" | "autumn" | "winter";
+export type Formality = "casual" | "semi-formal" | "formal";
+export type Style = "casual" | "minimal" | "classic" | "street" | "sporty";
+
+export type Clothing = {
+  id: string;
+  name: string;
+  slot: Slot;
+  color: string;
+  seasons: Season[];
+  style: Style;
+  formality: Formality;
+  // 두께: 1 thin, 2 regular, 3 thick.
+  warmth: 1 | 2 | 3;
+};
+
+export type NewClothing = Omit<Clothing, "id">;
+
+export type Preferences = { colors: string[]; styles: Style[] };
+
+type Tables = {
+  clothing: {
+    id: string;
+    user_id: string;
+    name: string;
+    slot: Slot;
+    color: string;
+    seasons: JSONColumnType<Season[]>;
+    style: Style;
+    formality: Formality;
+    warmth: 1 | 2 | 3;
+    created_at: Generated<Date>;
+  };
+  clothing_preference: {
+    user_id: string;
+    colors: JSONColumnType<string[]>;
+    styles: JSONColumnType<Style[]>;
+  };
+};
+
+export function createWardrobe({ dialect }: { dialect: Dialect }) {
+  const db = new Kysely<Tables>({ dialect });
+
+  return {
+    async migrate() {
+      await db.schema
+        .createTable("clothing")
+        .ifNotExists()
+        .addColumn("id", "text", (c) => c.primaryKey())
+        .addColumn("user_id", "text", (c) =>
+          c.notNull().references("user.id").onDelete("cascade"),
+        )
+        .addColumn("name", "text", (c) => c.notNull())
+        .addColumn("slot", "text", (c) => c.notNull())
+        .addColumn("color", "text", (c) => c.notNull())
+        .addColumn("seasons", "jsonb", (c) => c.notNull())
+        .addColumn("style", "text", (c) => c.notNull())
+        .addColumn("formality", "text", (c) => c.notNull())
+        .addColumn("warmth", "integer", (c) => c.notNull())
+        .addColumn("created_at", "timestamptz", (c) => c.notNull().defaultTo(sql`now()`))
+        .execute();
+      await db.schema
+        .createTable("clothing_preference")
+        .ifNotExists()
+        .addColumn("user_id", "text", (c) =>
+          c.primaryKey().references("user.id").onDelete("cascade"),
+        )
+        .addColumn("colors", "jsonb", (c) => c.notNull())
+        .addColumn("styles", "jsonb", (c) => c.notNull())
+        .execute();
+    },
+
+    async addClothing(userId: string, clothing: NewClothing): Promise<Clothing> {
+      const id = randomUUID();
+      await db
+        .insertInto("clothing")
+        .values({
+          id,
+          user_id: userId,
+          ...clothing,
+          seasons: JSON.stringify(clothing.seasons),
+        })
+        .execute();
+      return { id, ...clothing };
+    },
+
+    async clothes(userId: string): Promise<Clothing[]> {
+      const rows = await db
+        .selectFrom("clothing")
+        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth"])
+        .where("user_id", "=", userId)
+        .orderBy("created_at")
+        .orderBy("id")
+        .execute();
+      return rows;
+    },
+
+    async setPreferences(userId: string, { colors, styles }: Preferences) {
+      const values = { colors: JSON.stringify(colors), styles: JSON.stringify(styles) };
+      await db
+        .insertInto("clothing_preference")
+        .values({ user_id: userId, ...values })
+        .onConflict((oc) => oc.column("user_id").doUpdateSet(values))
+        .execute();
+    },
+
+    async preferences(userId: string): Promise<Preferences> {
+      const row = await db
+        .selectFrom("clothing_preference")
+        .select(["colors", "styles"])
+        .where("user_id", "=", userId)
+        .executeTakeFirst();
+      return row ?? { colors: [], styles: [] };
+    },
+  };
+}
+
+export type Wardrobe = ReturnType<typeof createWardrobe>;

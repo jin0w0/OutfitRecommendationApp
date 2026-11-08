@@ -13,8 +13,10 @@ export async function createTestAccount(
   vi.stubGlobal("fetch", google.fetch);
 
   const pg = await PGlite.create();
+  // Shared with other features' test harnesses so their tables sit next to `user`.
+  const dialect = new PGliteDialect(pg);
   const account = createAccount({
-    dialect: new PGliteDialect(pg),
+    dialect,
     baseURL: TEST_BASE_URL,
     secret: "test-secret-that-is-at-least-32-characters",
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
@@ -86,5 +88,5 @@ export async function createTestAccount(
     }
   }
 
-  return { account, google, signInWithGoogle, connectCalendar, Browser };
+  return { account, google, dialect, signInWithGoogle, connectCalendar, Browser };
 }
