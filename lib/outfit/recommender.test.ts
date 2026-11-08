@@ -57,6 +57,31 @@ describe("recommending an outfit from the 옷장 alone", () => {
     expect(result.outfit).toEqual({ dress, shoes: flats });
   });
 
+  test("the 옷장 lists clothes in the order they were added, even when added at the same moment", async () => {
+    // Ties in the score go to the clothes listed first, so this order must
+    // not change from one run to the next.
+    const { wardrobe, createUser } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const names = Array.from({ length: 12 }, (_, n) => `흰 티셔츠 ${n}`);
+    // Added without waiting for each other, so several share a 등록 time.
+    await Promise.all(
+      names.map((name) =>
+        wardrobe.addClothing(minji, {
+          name,
+          slot: "top",
+          color: "white",
+          seasons: ["spring", "summer", "autumn", "winter"],
+          style: "casual",
+          formality: "casual",
+          warmth: 2,
+          material: "cotton",
+        }),
+      ),
+    );
+
+    expect((await wardrobe.clothes(minji)).map((c) => c.name)).toEqual(names);
+  });
+
   test("without shoes the 옷장 cannot make an outfit, and says shoes are missing", async () => {
     const { recommender, createUser, addClothes } = await createTestOutfit();
     const minji = await createUser("minji@gmail.com");
