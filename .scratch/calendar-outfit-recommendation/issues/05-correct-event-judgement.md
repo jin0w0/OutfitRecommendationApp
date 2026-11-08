@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 격식을 포멀에서 캐주얼로 고치면 다시 받은 추천은 캐주얼 기준으로 골라진다
 - [x] 고친 일정을 다음에 다시 불러와도 고친 값이 쓰이고, LLM에는 다시 묻지 않는다

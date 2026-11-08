@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 오늘 날짜의 코디를 수락하면 착용 기록이 생긴다
 - [x] 미래 날짜의 코디를 수락하면 계획이 생기고, 착용 기록 점수에는 반영되지 않는다

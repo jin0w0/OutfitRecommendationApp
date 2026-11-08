@@ -1,6 +1,6 @@
 # 일정 기반 코디 추천 및 대화형 수정
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

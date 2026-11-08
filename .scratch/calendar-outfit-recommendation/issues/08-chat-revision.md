@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] "이 바지 말고" 이후의 코디에는 그 바지가 없다
 - [x] "이 셔츠는 꼭 입고 싶어" 이후의 코디에는 그 셔츠가 있다

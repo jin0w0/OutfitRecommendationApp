@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 추천 이유는 2~3개이고, 각각 요소와 관련 옷과 사실값을 담는다
 - [x] 추천 이유의 요소는 요소별 점수에서 기여도가 가장 큰 것들이다
