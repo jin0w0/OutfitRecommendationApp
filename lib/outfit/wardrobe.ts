@@ -7,6 +7,16 @@ export type Slot = "top" | "bottom" | "dress" | "outer" | "shoes";
 export type Season = "spring" | "summer" | "autumn" | "winter";
 export type Formality = "casual" | "semi-formal" | "formal";
 export type Style = "casual" | "minimal" | "classic" | "street" | "sporty";
+export type Material =
+  | "cotton"
+  | "linen"
+  | "denim"
+  | "wool"
+  | "knit"
+  | "leather"
+  | "suede"
+  | "canvas"
+  | "synthetic";
 
 export type Clothing = {
   id: string;
@@ -18,6 +28,7 @@ export type Clothing = {
   formality: Formality;
   // 두께: 1 thin, 2 regular, 3 thick.
   warmth: 1 | 2 | 3;
+  material: Material;
 };
 
 export type NewClothing = Omit<Clothing, "id">;
@@ -35,6 +46,7 @@ type Tables = {
     style: Style;
     formality: Formality;
     warmth: 1 | 2 | 3;
+    material: Generated<Material>;
     created_at: Generated<Date>;
   };
   clothing_preference: {
@@ -65,6 +77,10 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
         .addColumn("warmth", "integer", (c) => c.notNull())
         .addColumn("created_at", "timestamptz", (c) => c.notNull().defaultTo(sql`now()`))
         .execute();
+      // Added after the table first shipped, so tables made before it get it too.
+      await sql`alter table clothing add column if not exists material text not null default 'cotton'`.execute(
+        db,
+      );
       await db.schema
         .createTable("clothing_preference")
         .ifNotExists()
@@ -93,7 +109,7 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
     async clothes(userId: string): Promise<Clothing[]> {
       const rows = await db
         .selectFrom("clothing")
-        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth"])
+        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth", "material"])
         .where("user_id", "=", userId)
         .orderBy("created_at")
         .orderBy("id")

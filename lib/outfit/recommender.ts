@@ -1,7 +1,7 @@
 // The 코디 추천 module. Callers see only its entry points; everything that goes
 // into choosing a 코디 happens inside.
 import { EVENT_KINDS, type EventKind } from "./situations";
-import type { Clothing, Formality, Preferences, Slot, Wardrobe } from "./wardrobe";
+import type { Clothing, Formality, Material, Preferences, Slot, Wardrobe } from "./wardrobe";
 import type { WearRecords, WearStatus } from "./wear-records";
 
 export type Outfit = {
@@ -9,7 +9,24 @@ export type Outfit = {
   bottom?: Clothing;
   dress?: Clothing;
   shoes: Clothing;
+  outer?: Clothing;
 };
+
+export type Coordinates = { latitude: number; longitude: number };
+
+// The day's weather: its representative 기온 in °C and whether it rains.
+export type Weather = { temperature: number; rain: boolean };
+
+// The 날씨 어댑터. Resolves to null when there is no forecast for the date
+// (예보 없음), and rejects when the forecast could not be fetched.
+export type WeatherSource = {
+  forecast(request: { date: string } & Coordinates): Promise<Weather | null>;
+};
+
+// Information the recommendation had to go without.
+//   no-forecast: the date is outside the forecast range (날씨 미반영)
+//   weather-failed: the 날씨 어댑터 failed
+export type MissingInfo = "no-forecast" | "weather-failed";
 
 // The 일정 the 코디 is chosen for: its 일정의 종류 and 격식 수준.
 export type Basis = { kind: EventKind; formality: Formality };
@@ -18,6 +35,7 @@ export type Basis = { kind: EventKind; formality: Formality };
 // `recency` is low for clothes worn in the last few days (최근 착용 기록);
 // `utilization` is high for clothes not worn in a long time (활용도).
 export type Scores = {
+  weather?: number;
   event?: number;
   color: number;
   style: number;
@@ -28,6 +46,7 @@ export type Scores = {
 
 // The same defaults for every user for now.
 const WEIGHTS: Required<Scores> = {
+  weather: 3,
   event: 3,
   color: 2,
   style: 1,
@@ -41,27 +60,45 @@ const RECENT_DAYS = 7;
 // Clothes not worn for this many days, or never, get the full 활용도 score.
 const LONG_UNWORN_DAYS = 30;
 
+// 소재 that rain ruins.
+const RAIN_WEAK_MATERIALS = new Set<Material>(["suede", "canvas"]);
+
 // Colors that go with anything; a 코디 reads well with at most one other.
 const NEUTRAL_COLORS = new Set(["black", "white", "gray", "navy", "beige", "brown"]);
+
+type RecommendationContext = {
+  date: string;
+  basis: Basis | null;
+  // The weather the 코디 was chosen for, or null when it was not 반영.
+  weather: Weather | null;
+  missing: MissingInfo[];
+  accepted: Accepted;
+};
 
 // The 코디 the user already accepted ("입을게요") for the date, if any.
 // Clothes since removed from the 옷장 are left out.
 export type Accepted = { status: WearStatus; clothes: Clothing[] } | null;
 
-export type Recommendation = { date: string; basis: Basis | null; accepted: Accepted } & (
-  | { status: "ok"; outfit: Outfit; scores: Scores }
-  // The 옷장 has nothing to fill these slots with.
-  | { status: "unbuildable"; missingSlots: Slot[] }
-);
+export type Recommendation = RecommendationContext &
+  (
+    | { status: "ok"; outfit: Outfit; scores: Scores }
+    // The 옷장 has nothing to fill these slots with.
+    | { status: "unbuildable"; missingSlots: Slot[] }
+  );
+
+// Below this 기온 (°C) the 코디 gets an 아우터.
+const OUTER_BELOW = 17;
 
 const FORMALITY_LEVEL: Record<Formality, number> = { casual: 0, "semi-formal": 1, formal: 2 };
 
 export function createOutfitRecommender({
   wardrobe,
+  weather: weatherSource,
   wearRecords,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "preferences">;
+  weather: WeatherSource;
   wearRecords: WearRecords;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
@@ -74,19 +111,27 @@ export function createOutfitRecommender({
       userId,
       date,
       situation,
+      location,
       shown = [],
     }: {
       userId: string;
       // YYYY-MM-DD
       date: string;
       situation: EventKind | null;
+      // Where the 코디 is worn: the user's 기본 지역 for now.
+      location: Coordinates;
       shown?: string[][];
     }): Promise<Recommendation> {
       const basis = situation && { kind: situation, formality: EVENT_KINDS[situation].formality };
+      const missing: MissingInfo[] = [];
+      let weather: Weather | null = null;
+      try {
+        weather = await weatherSource.forecast({ date, ...location });
+        if (!weather) missing.push("no-forecast");
+      } catch {
+        missing.push("weather-failed");
+      }
       const wardrobeClothes = await wardrobe.clothes(userId);
-      const clothes = suitableClothes(wardrobeClothes, basis);
-      const preferences = await wardrobe.preferences(userId);
-      const daysSinceWorn = await daysSinceLastWorn(userId, date);
       const record = await wearRecords.onDate(userId, date);
       const accepted: Accepted = record
         ? {
@@ -94,20 +139,26 @@ export function createOutfitRecommender({
             clothes: record.clothingIds.flatMap((id) => wardrobeClothes.filter((c) => c.id === id)),
           }
         : null;
-      const candidates = candidateOutfits(clothes);
+      const context = { date, basis, weather, missing, accepted };
+
+      const clothes = suitableClothes(wardrobeClothes, basis);
+      const preferences = await wardrobe.preferences(userId);
+      const daysSinceWorn = await daysSinceLastWorn(userId, date);
+      const needsOuter = weather !== null && weather.temperature < OUTER_BELOW;
+      const candidates = candidateOutfits(clothes, needsOuter);
       const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
       const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
       const best = maxBy(
         (unshown.length ? unshown : candidates).map((outfit) => ({
           outfit,
-          scores: score(outfit, basis, preferences, daysSinceWorn),
+          scores: score(outfit, basis, weather, preferences, daysSinceWorn),
         })),
         ({ scores }) => total(scores),
       );
       if (!best) {
-        return { status: "unbuildable", date, basis, accepted, missingSlots: missingSlots(clothes) };
+        return { status: "unbuildable", ...context, missingSlots: missingSlots(clothes) };
       }
-      return { status: "ok", date, basis, accepted, ...best };
+      return { status: "ok", ...context, ...best };
     },
 
     // "입을게요": the user will wear these clothes on `date`. Replaces any 코디
@@ -174,6 +225,7 @@ function suitableClothes(clothes: Clothing[], basis: Basis | null) {
 function score(
   outfit: Outfit,
   basis: Basis | null,
+  weather: Weather | null,
   preferences: Preferences,
   daysSinceWorn: Map<string, number>,
 ): Scores {
@@ -189,7 +241,28 @@ function score(
   if (basis) {
     scores.event = average(items.map((c) => (c.formality === basis.formality ? 1 : 0)));
   }
+  if (weather) {
+    scores.weather = average(items.map((c) => weatherFit(c, weather)));
+  }
   return scores;
+}
+
+// How well one piece suits the day: its 두께 against the 기온, and, on a rainy
+// day, whether its 소재 stands up to rain.
+function weatherFit(clothing: Clothing, { temperature, rain }: Weather) {
+  if (rain && RAIN_WEAK_MATERIALS.has(clothing.material)) return 0;
+  const target = clothing.slot === "outer" ? outerWarmth(temperature) : baseWarmth(temperature);
+  return 1 - Math.abs(clothing.warmth - target) / 2;
+}
+
+// The 두께 that suits the 기온 for what is worn under any 아우터.
+function baseWarmth(temperature: number) {
+  return temperature >= 23 ? 1 : temperature >= 10 ? 2 : 3;
+}
+
+// The 두께 that suits the 기온 for an 아우터.
+function outerWarmth(temperature: number) {
+  return temperature >= 12 ? 1 : temperature >= 5 ? 2 : 3;
 }
 
 function total(scores: Scores) {
@@ -246,8 +319,9 @@ function missingSlots(clothes: Clothing[]): Slot[] {
   return missing;
 }
 
-// Every complete 코디 the 옷장 can make: 상의·하의·신발, or 원피스·신발.
-function candidateOutfits(clothes: Clothing[]): Outfit[] {
+// Every complete 코디 the 옷장 can make: 상의·하의·신발, or 원피스·신발, each
+// with an 아우터 when one is needed and the 옷장 has any.
+function candidateOutfits(clothes: Clothing[], needsOuter: boolean): Outfit[] {
   const of = (slot: Slot) => clothes.filter((c) => c.slot === slot);
   const outfits: Outfit[] = [];
   for (const shoes of of("shoes")) {
@@ -256,7 +330,9 @@ function candidateOutfits(clothes: Clothing[]): Outfit[] {
     }
     for (const dress of of("dress")) outfits.push({ dress, shoes });
   }
-  return outfits;
+  const outers = of("outer");
+  if (!needsOuter || !outers.length) return outfits;
+  return outfits.flatMap((outfit) => outers.map((outer) => ({ ...outfit, outer })));
 }
 
 export type OutfitRecommender = ReturnType<typeof createOutfitRecommender>;

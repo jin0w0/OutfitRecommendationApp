@@ -31,12 +31,15 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
       ? params.date
       : todayInKorea();
   const situation = isEventKind(params.situation) ? params.situation : null;
+  // Onboarding above guarantees a 기본 지역.
+  const { name: regionName, latitude, longitude } = user.homeRegion!;
   // 코디 already shown for this date (다시 추천받기), each as dot-joined clothing ids.
   const shown = [params.shown ?? []].flat().map((outfit) => outfit.split("."));
   const recommendation = await getOutfitRecommender().recommendForDate({
     userId: user.id,
     date,
     situation,
+    location: { latitude, longitude },
     shown,
   });
 
@@ -47,7 +50,12 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         <ReconnectNotice returnTo="/home" />
       )}
       <OutfitRequestForm date={date} situation={situation} />
-      <RecommendationView recommendation={recommendation} situation={situation} shown={shown} />
+      <RecommendationView
+        recommendation={recommendation}
+        regionName={regionName}
+        situation={situation}
+        shown={shown}
+      />
     </>
   );
 }

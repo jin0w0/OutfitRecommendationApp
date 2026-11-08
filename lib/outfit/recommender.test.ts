@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createTestOutfit } from "./testing/harness";
+import { SEOUL, createTestOutfit } from "./testing/harness";
 
 const DATE = "2026-11-10";
 
@@ -13,7 +13,7 @@ describe("recommending an outfit from the 옷장 alone", () => {
       { name: "운동화", slot: "shoes" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -35,7 +35,7 @@ describe("recommending an outfit from the 옷장 alone", () => {
       { name: "민지 운동화", slot: "shoes" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -50,7 +50,7 @@ describe("recommending an outfit from the 옷장 alone", () => {
       { name: "플랫슈즈", slot: "shoes" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -65,7 +65,7 @@ describe("recommending an outfit from the 옷장 alone", () => {
       { name: "청바지", slot: "bottom" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "unbuildable", missingSlots: ["shoes"] });
   });
@@ -78,7 +78,7 @@ describe("recommending an outfit from the 옷장 alone", () => {
       { name: "운동화", slot: "shoes" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "unbuildable", missingSlots: ["bottom"] });
   });
@@ -95,7 +95,7 @@ describe("색상 조합", () => {
       { name: "검은 운동화", slot: "shoes", color: "black" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { top: whiteTee }, scores: { color: 1 } });
   });
@@ -113,7 +113,7 @@ describe("preferences", () => {
     ]);
     await wardrobe.setPreferences(minji, { colors: ["navy"], styles: [] });
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { top: navyTee } });
   });
@@ -129,7 +129,7 @@ describe("preferences", () => {
     ]);
     await wardrobe.setPreferences(minji, { colors: [], styles: ["street"] });
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { top: streetTee } });
   });
@@ -152,6 +152,7 @@ describe("recommending for a situation the user picked", () => {
       userId: minji,
       date: DATE,
       situation: "interview",
+      location: SEOUL,
     });
 
     expect(result).toMatchObject({
@@ -174,6 +175,7 @@ describe("recommending for a situation the user picked", () => {
       userId: minji,
       date: DATE,
       situation: "interview",
+      location: SEOUL,
     });
 
     expect(result).toMatchObject({ status: "unbuildable", missingSlots: ["shoes"] });
@@ -193,6 +195,7 @@ describe("recommending for a situation the user picked", () => {
       userId: minji,
       date: DATE,
       situation: "interview",
+      location: SEOUL,
     });
 
     expect(result).toMatchObject({ status: "ok", outfit: { shoes: loafers } });
@@ -207,11 +210,153 @@ describe("recommending for a situation the user picked", () => {
       { name: "검은 운동화", slot: "shoes", color: "black" },
     ]);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.basis).toBeNull();
     expect(result.scores).toEqual({ color: 1, style: 1, preference: 0, recency: 1, utilization: 1 });
+  });
+});
+
+describe("날씨", () => {
+  test("on a 5°C day the outfit includes an outer", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , , coat] = await addClothes(minji, [
+      { name: "맨투맨", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+      { name: "울 코트", slot: "outer", warmth: 3 },
+    ]);
+    weather.setForecast(DATE, { temperature: 5, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", outfit: { outer: coat } });
+  });
+
+  test("on a 25°C day there is no outer and thin clothes are chosen", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, tee, , shorts, sneakers] = await addClothes(minji, [
+      { name: "두꺼운 니트", slot: "top", warmth: 3 },
+      { name: "반팔 티셔츠", slot: "top", warmth: 1 },
+      { name: "기모 바지", slot: "bottom", warmth: 3 },
+      { name: "반바지", slot: "bottom", warmth: 1 },
+      { name: "운동화", slot: "shoes", warmth: 1 },
+      { name: "울 코트", slot: "outer", warmth: 3 },
+    ]);
+    weather.setForecast(DATE, { temperature: 25, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.outfit).toEqual({ top: tee, bottom: shorts, shoes: sneakers });
+  });
+
+  test("the result says which weather the outfit was chosen for", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    weather.setForecast(DATE, { temperature: 18, rain: true });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ weather: { temperature: 18, rain: true }, missing: [] });
+  });
+
+  test("the weather is looked up for the date at the given location", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+
+    await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(weather.requests).toEqual([{ date: DATE, ...SEOUL }]);
+  });
+
+  test("on a rainy day shoes that rain ruins lose out", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , , rainBoots] = await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "스웨이드 로퍼", slot: "shoes", material: "suede" },
+      { name: "레인부츠", slot: "shoes", material: "synthetic" },
+    ]);
+    weather.setForecast(DATE, { temperature: 20, rain: true });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", outfit: { shoes: rainBoots } });
+  });
+
+  test("on a dry day the same shoes are not penalized", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , loafers] = await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "스웨이드 로퍼", slot: "shoes", material: "suede" },
+      { name: "레인부츠", slot: "shoes", material: "synthetic" },
+    ]);
+    weather.setForecast(DATE, { temperature: 20, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", outfit: { shoes: loafers }, scores: { weather: 1 } });
+  });
+
+  test("a date with no forecast is recommended without weather, saying so", async () => {
+    const { recommender, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [tee, jeans, sneakers] = await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+      { name: "울 코트", slot: "outer", warmth: 3 },
+    ]);
+
+    const farOff = await recommender.recommendForDate({ userId: minji, date: "2026-12-25", situation: null, location: SEOUL });
+
+    expect(farOff).toMatchObject({
+      status: "ok",
+      outfit: { top: tee, bottom: jeans, shoes: sneakers },
+      weather: null,
+      missing: ["no-forecast"],
+    });
+    if (farOff.status !== "ok") return;
+    expect(farOff.outfit.outer).toBeUndefined();
+    expect(farOff.scores.weather).toBeUndefined();
+  });
+
+  test("when the weather service fails the outfit is still recommended, saying weather failed", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [tee, jeans, sneakers] = await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    weather.failWith();
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      outfit: { top: tee, bottom: jeans, shoes: sneakers },
+      weather: null,
+      missing: ["weather-failed"],
+    });
   });
 });

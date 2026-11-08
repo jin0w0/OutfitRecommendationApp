@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createTestOutfit } from "./testing/harness";
+import { createTestOutfit, SEOUL } from "./testing/harness";
 
 const TODAY = "2026-11-10";
 
@@ -19,7 +19,7 @@ describe("입을게요", () => {
     const { recommender, minji, clothes } = await minjiWithBasics();
 
     await recommender.accept({ userId: minji, date: TODAY, clothingIds: clothes.map((c) => c.id) });
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result.accepted).toEqual({ status: "worn", clothes });
   });
@@ -28,7 +28,7 @@ describe("입을게요", () => {
     const { recommender, minji, clothes } = await minjiWithBasics();
 
     await recommender.accept({ userId: minji, date: "2026-11-14", clothingIds: clothes.map((c) => c.id) });
-    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-14", situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-14", situation: null, location: SEOUL });
 
     expect(result.accepted).toEqual({ status: "planned", clothes });
   });
@@ -37,7 +37,7 @@ describe("입을게요", () => {
     const { recommender, minji, clothes } = await minjiWithBasics();
 
     await recommender.accept({ userId: minji, date: "2026-11-08", clothingIds: clothes.map((c) => c.id) });
-    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-08", situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-08", situation: null, location: SEOUL });
 
     expect(result.accepted).toMatchObject({ status: "worn" });
   });
@@ -47,7 +47,7 @@ describe("입을게요", () => {
     await recommender.accept({ userId: minji, date: TODAY, clothingIds: clothes.map((c) => c.id) });
 
     await recommender.cancelAcceptance({ userId: minji, date: TODAY });
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result.accepted).toBeNull();
   });
@@ -57,7 +57,7 @@ describe("입을게요", () => {
     await recommender.accept({ userId: minji, date: "2026-11-14", clothingIds: clothes.map((c) => c.id) });
 
     await recommender.cancelAcceptance({ userId: minji, date: "2026-11-14" });
-    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-14", situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-14", situation: null, location: SEOUL });
 
     expect(result.accepted).toBeNull();
   });
@@ -72,7 +72,7 @@ describe("입을게요 with someone else's clothes", () => {
     await expect(
       recommender.accept({ userId: minji, date: TODAY, clothingIds: [junhoShirt.id, clothes[1].id, clothes[2].id] }),
     ).rejects.toThrow();
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result.accepted).toBeNull();
   });
@@ -97,7 +97,7 @@ describe("최근 착용 기록과 활용도", () => {
     const { recommender, minji, chinos, jeans, wear } = await minjiWithTwoPants();
     await wear("2026-11-09", jeans);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { bottom: chinos } });
   });
@@ -107,7 +107,7 @@ describe("최근 착용 기록과 활용도", () => {
     await wear("2026-10-20", chinos);
     await wear("2026-10-30", jeans);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { bottom: chinos } });
   });
@@ -117,7 +117,7 @@ describe("최근 착용 기록과 활용도", () => {
     await wear("2026-11-09", chinos);
     await wear("2026-11-11", jeans);
 
-    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-12", situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: "2026-11-12", situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { bottom: jeans } });
   });
@@ -128,7 +128,7 @@ describe("최근 착용 기록과 활용도", () => {
     await wear("2026-11-09", jeans);
     await recommender.cancelAcceptance({ userId: minji, date: "2026-11-09" });
 
-    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const result = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { bottom: jeans } });
   });
@@ -146,13 +146,13 @@ describe("다시 추천받기", () => {
       { name: "청바지", slot: "bottom" },
       { name: "운동화", slot: "shoes" },
     ]);
-    const first = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const first = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
     if (first.status !== "ok") throw new Error("expected an outfit");
 
     const again = await recommender.recommendForDate({
       userId: minji,
       date: TODAY,
-      situation: null,
+      situation: null, location: SEOUL,
       shown: [ids(first.outfit)],
     });
 
@@ -171,12 +171,12 @@ describe("다시 추천받기", () => {
       { name: "청바지", slot: "bottom" },
       { name: "운동화", slot: "shoes" },
     ]);
-    const first = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null });
+    const first = await recommender.recommendForDate({ userId: minji, date: TODAY, situation: null, location: SEOUL });
     if (first.status !== "ok") throw new Error("expected an outfit");
     const second = await recommender.recommendForDate({
       userId: minji,
       date: TODAY,
-      situation: null,
+      situation: null, location: SEOUL,
       shown: [ids(first.outfit)],
     });
     if (second.status !== "ok") throw new Error("expected an outfit");
@@ -184,7 +184,7 @@ describe("다시 추천받기", () => {
     const third = await recommender.recommendForDate({
       userId: minji,
       date: TODAY,
-      situation: null,
+      situation: null, location: SEOUL,
       shown: [ids(first.outfit), ids(second.outfit)],
     });
 
@@ -200,7 +200,7 @@ describe("다시 추천받기", () => {
     const again = await recommender.recommendForDate({
       userId: minji,
       date: TODAY,
-      situation: null,
+      situation: null, location: SEOUL,
       shown: [clothes.map((c) => c.id)],
     });
 
@@ -218,7 +218,7 @@ describe("탈퇴", () => {
     await deleteAccount(minji);
 
     for (const date of ["2026-11-09", "2026-11-14"]) {
-      const result = await recommender.recommendForDate({ userId: minji, date, situation: null });
+      const result = await recommender.recommendForDate({ userId: minji, date, situation: null, location: SEOUL });
       expect(result.accepted).toBeNull();
     }
   });
