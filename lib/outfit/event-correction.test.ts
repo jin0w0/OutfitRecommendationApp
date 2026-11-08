@@ -137,7 +137,7 @@ describe("일정 판단 직접 고치기", () => {
       baseEvent: { id: event.id },
       basis: { kind: "appointment", formality: "casual" },
       outfit: casual,
-      missing: ["llm-failed", "no-forecast"],
+      missing: ["llm-failed", "no-forecast", "reasons-llm-failed"],
     });
   });
 

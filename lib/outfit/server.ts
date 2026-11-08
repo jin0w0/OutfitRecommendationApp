@@ -50,13 +50,12 @@ function weatherSource(): WeatherSource {
 }
 
 // Without a key every LLM call fails, so recommendations go on without the
-// 일정 judged and say so.
+// 일정 judged and with template 추천 이유, and say so.
 function languageModel(): LanguageModel {
   const apiKey = process.env.OPENAI_API_KEY;
   if (apiKey) return createOpenAiLanguageModel({ apiKey, model: process.env.OPENAI_MODEL || undefined });
-  return {
-    async judgeEvents() {
-      throw new Error("Missing environment variable OPENAI_API_KEY");
-    },
+  const missingKey = async (): Promise<never> => {
+    throw new Error("Missing environment variable OPENAI_API_KEY");
   };
+  return { judgeEvents: missingKey, writeReasons: missingKey };
 }

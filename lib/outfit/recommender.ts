@@ -2,7 +2,8 @@
 // into choosing a 코디 happens inside.
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
-import type { Clothing, Formality, Material, Preferences, Slot, Wardrobe } from "./wardrobe";
+import { templateSentence } from "./reasons";
+import type { Clothing, Formality, Material, Preferences, Slot, Style, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 
@@ -69,6 +70,9 @@ export type EventJudgement = { kind: EventKind; formality: Formality };
 export type LanguageModel = {
   // One judgement per 일정, in the same order.
   judgeEvents(events: EventText[]): Promise<EventJudgement[]>;
+  // One short sentence per 근거, in the same order, saying only what the
+  // 근거 holds.
+  writeReasons(evidence: Evidence[]): Promise<string[]>;
 };
 
 // One of the day's 일정 with what was judged of it, or null when it could not
@@ -83,12 +87,15 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 //   calendar-failed: the 캘린더 어댑터 failed otherwise
 //   llm-failed: the LLM could not judge the day's 일정, so the 코디 follows
 //     the situation the user picked, or none
+//   reasons-llm-failed: the LLM could not write the 추천 이유, so they are
+//     plain sentences made from the 근거
 export type MissingInfo =
   | "no-forecast"
   | "weather-failed"
   | "calendar-reconnect-needed"
   | "calendar-failed"
-  | "llm-failed";
+  | "llm-failed"
+  | "reasons-llm-failed";
 
 // The 일정 the 코디 is chosen for: its 일정의 종류 and 격식 수준.
 export type Basis = EventJudgement;
@@ -105,6 +112,33 @@ export type Scores = {
   recency: number;
   utilization: number;
 };
+
+export type Factor = keyof Scores;
+
+// The 근거 behind one 추천 이유: a factor of the score, the pieces of the 코디
+// it is about, and the facts that made them score well. It comes only from
+// the scoring.
+export type Evidence =
+  // The day's weather, and the pieces that suit it (any 아우터 among them).
+  | { factor: "weather"; clothes: Clothing[]; facts: Weather }
+  // The 기준 일정 (or picked situation, untitled), and the pieces at its 격식 수준.
+  | { factor: "event"; clothes: Clothing[]; facts: Basis & { title: string | null } }
+  // Every color of the 코디, and those of them that are not neutral.
+  | { factor: "color"; clothes: Clothing[]; facts: { colors: string[]; accents: string[] } }
+  // The style most of the 코디 shares, and the pieces in it.
+  | { factor: "style"; clothes: Clothing[]; facts: { style: Style } }
+  // The user's preferred colors and styles that the pieces match.
+  | { factor: "preference"; clothes: Clothing[]; facts: { colors: string[]; styles: Style[] } }
+  // The pieces not worn in the last `days` days.
+  | { factor: "recency"; clothes: Clothing[]; facts: { days: number } }
+  // The pieces not worn for at least `days` days, or never.
+  | { factor: "utilization"; clothes: Clothing[]; facts: { days: number } };
+
+// One 추천 이유: its 근거, and the 근거 as a sentence for the user.
+export type Reason = { evidence: Evidence; sentence: string };
+
+// How many 추천 이유 a 코디 comes with, at most.
+const MAX_REASONS = 3;
 
 // The same defaults for every user for now.
 const WEIGHTS: Required<Scores> = {
@@ -152,7 +186,8 @@ export type Accepted = { status: WearStatus; clothes: Clothing[] } | null;
 
 export type Recommendation = RecommendationContext &
   (
-    | { status: "ok"; outfit: Outfit; scores: Scores }
+    // `reasons`: the 추천 이유, from the factors that added most to the score.
+    | { status: "ok"; outfit: Outfit; scores: Scores; reasons: Reason[] }
     // The 옷장 has nothing to fill these slots with.
     | { status: "unbuildable"; missingSlots: Slot[] }
   );
@@ -297,8 +332,14 @@ export function createOutfitRecommender({
         event !== baseEvent && event.judgement ? [event.judgement.formality] : [],
       );
       const clothes = suitableClothes(wardrobeClothes, basis);
-      const preferences = await wardrobe.preferences(userId);
-      const daysSinceWorn = await daysSinceLastWorn(userId, date);
+      const scoring: ScoringFacts = {
+        basis,
+        basisTitle: baseEvent?.judgement ? baseEvent.title : null,
+        otherFormalities,
+        weather,
+        preferences: await wardrobe.preferences(userId),
+        daysSinceWorn: await daysSinceLastWorn(userId, date),
+      };
       const needsOuter = weather !== null && weather.temperature < OUTER_BELOW;
       const candidates = candidateOutfits(clothes, needsOuter);
       const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
@@ -306,14 +347,16 @@ export function createOutfitRecommender({
       const best = maxBy(
         (unshown.length ? unshown : candidates).map((outfit) => ({
           outfit,
-          scores: score(outfit, basis, otherFormalities, weather, preferences, daysSinceWorn),
+          scores: score(outfit, scoring),
         })),
         ({ scores }) => total(scores),
       );
       if (!best) {
         return { status: "unbuildable", ...context, missingSlots: missingSlots(clothes) };
       }
-      return { status: "ok", ...context, ...best };
+      const { reasons, failed: reasonsFailed } = await explain(best.outfit, best.scores, scoring);
+      if (reasonsFailed) missing.push("reasons-llm-failed");
+      return { status: "ok", ...context, ...best, reasons };
     },
 
     // "입을게요": the user will wear these clothes on `date`. Replaces any 코디
@@ -346,6 +389,27 @@ export function createOutfitRecommender({
       await wearRecords.remove(userId, date);
     },
   };
+
+  // The 추천 이유 for a scored 코디: the 근거 of the factors that added most
+  // to its score, put into sentences by the LLM, or by template when it
+  // fails. Every 코디 the module returns goes through this.
+  async function explain(
+    outfit: Outfit,
+    scores: Scores,
+    scoring: ScoringFacts,
+  ): Promise<{ reasons: Reason[]; failed: boolean }> {
+    const evidence = topEvidence(outfit, scores, scoring);
+    if (!evidence.length) return { reasons: [], failed: false };
+    try {
+      const sentences = await llm.writeReasons(evidence);
+      if (sentences.length !== evidence.length || sentences.some((s) => !s.trim())) {
+        throw new Error("A sentence per 근거 was expected");
+      }
+      return { reasons: evidence.map((e, i) => ({ evidence: e, sentence: sentences[i] })), failed: false };
+    } catch {
+      return { reasons: evidence.map((e) => ({ evidence: e, sentence: templateSentence(e) })), failed: true };
+    }
+  }
 
   // Per clothing id, days from its latest 착용 기록 before `date` to `date`.
   // Plans never count.
@@ -408,13 +472,22 @@ function suitableClothes(clothes: Clothing[], basis: Basis | null) {
   return suitable;
 }
 
+// What a 코디 is scored against.
+type ScoringFacts = {
+  basis: Basis | null;
+  // The 기준 일정's title when the basis is its judgement, else null.
+  basisTitle: string | null;
+  // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
+  otherFormalities: Formality[];
+  weather: Weather | null;
+  preferences: Preferences;
+  // Per clothing id, days since its latest 착용 기록. Absent if never worn.
+  daysSinceWorn: Map<string, number>;
+};
+
 function score(
   outfit: Outfit,
-  basis: Basis | null,
-  otherFormalities: Formality[],
-  weather: Weather | null,
-  preferences: Preferences,
-  daysSinceWorn: Map<string, number>,
+  { basis, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
 ): Scores {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -432,6 +505,84 @@ function score(
     scores.weather = average(items.map((c) => weatherFit(c, weather)));
   }
   return scores;
+}
+
+// The order factors are listed in, which also settles equal contributions.
+const FACTORS: Factor[] = ["weather", "event", "color", "style", "preference", "recency", "utilization"];
+
+// The 근거 of the factors that added most to the 코디's score (weight times
+// score), up to MAX_REASONS. Factors that added nothing, or that no piece of
+// the 코디 stands for, give no 근거.
+function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evidence[] {
+  const contribution = (factor: Factor) => WEIGHTS[factor] * (scores[factor] ?? 0);
+  return FACTORS.filter((factor) => contribution(factor) > 0)
+    .sort((a, b) => contribution(b) - contribution(a))
+    .flatMap((factor) => {
+      const found = evidenceFor(factor, outfit, scoring);
+      return found && found.clothes.length ? [found] : [];
+    })
+    .slice(0, MAX_REASONS);
+}
+
+// What made `factor` score well for the 코디, from the same facts the score
+// came from. Null when the factor did not apply.
+function evidenceFor(
+  factor: Factor,
+  outfit: Outfit,
+  { basis, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+): Evidence | null {
+  const items = Object.values(outfit);
+  const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
+  switch (factor) {
+    case "weather":
+      if (!weather) return null;
+      return {
+        factor,
+        // An 아우터 is there for the weather, however well it fits.
+        clothes: items.filter((c) => c.slot === "outer" || weatherFit(c, weather) === 1),
+        facts: { temperature: weather.temperature, rain: weather.rain },
+      };
+    case "event":
+      if (!basis) return null;
+      return {
+        factor,
+        clothes: items.filter((c) => eventFit(c, basis, otherFormalities) === 1),
+        facts: { kind: basis.kind, formality: basis.formality, title: basisTitle },
+      };
+    case "color": {
+      const colors = [...new Set(items.map((c) => c.color))];
+      return {
+        factor,
+        clothes: items,
+        facts: { colors, accents: colors.filter((color) => !NEUTRAL_COLORS.has(color)) },
+      };
+    }
+    case "style": {
+      const counts = new Map<Style, number>();
+      for (const { style } of items) counts.set(style, (counts.get(style) ?? 0) + 1);
+      const style = maxBy([...counts], ([, count]) => count)![0];
+      return { factor, clothes: items.filter((c) => c.style === style), facts: { style } };
+    }
+    case "preference": {
+      const clothes = items.filter((c) => preferenceMatch(c, preferences) > 0);
+      return {
+        factor,
+        clothes,
+        facts: {
+          colors: preferences.colors.filter((color) => clothes.some((c) => c.color === color)),
+          styles: preferences.styles.filter((style) => clothes.some((c) => c.style === style)),
+        },
+      };
+    }
+    case "recency":
+      return { factor, clothes: items.filter((c) => days(c) >= RECENT_DAYS), facts: { days: RECENT_DAYS } };
+    case "utilization":
+      return {
+        factor,
+        clothes: items.filter((c) => days(c) >= LONG_UNWORN_DAYS),
+        facts: { days: LONG_UNWORN_DAYS },
+      };
+  }
 }
 
 // How well one piece suits the day's 일정: full marks at the 기준 일정's 격식

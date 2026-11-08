@@ -6,6 +6,7 @@ import {
   type CalendarStatus,
   type EventJudgement,
   type EventText,
+  type Evidence,
   type LanguageModel,
   type Weather,
   type WeatherSource,
@@ -162,13 +163,19 @@ class FakeCalendar implements CalendarSource {
   }
 }
 
+// How every sentence the fake LLM writes begins.
+export const FAKE_SENTENCE = "LLM이 쓴 문장:";
+
 // The LLM, answering only what the test prepared: an 일정 whose title has no
-// prepared judgement makes the whole call fail, as does `failWith`.
+// prepared judgement makes the whole call fail, as does `failWith` for every
+// call.
 class FakeLanguageModel implements LanguageModel {
   private judgements = new Map<string, EventJudgement>();
   private failure: Error | null = null;
   // What each judgeEvents call was given.
   judgeRequests: EventText[][] = [];
+  // What each writeReasons call was given.
+  reasonRequests: Evidence[][] = [];
 
   // 일정 titled `title` are judged as `judgement`.
   judge(title: string, judgement: EventJudgement) {
@@ -177,6 +184,14 @@ class FakeLanguageModel implements LanguageModel {
 
   failWith(error = new Error("the LLM is down")) {
     this.failure = error;
+  }
+
+  // Sentences say which factor they are for, so tests can tell them from
+  // template sentences without depending on wording.
+  async writeReasons(evidence: Evidence[]) {
+    this.reasonRequests.push(evidence);
+    if (this.failure) throw this.failure;
+    return evidence.map(({ factor }) => `${FAKE_SENTENCE} ${factor}`);
   }
 
   async judgeEvents(events: EventText[]) {

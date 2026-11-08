@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { DayEvent, Outfit, Recommendation } from "@/lib/outfit/recommender";
+import type { DayEvent, Factor, Outfit, Recommendation } from "@/lib/outfit/recommender";
 import { acceptOutfit, cancelAcceptance, correctEvent } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
@@ -112,6 +112,7 @@ export function RecommendationView({
               );
             })}
           </ul>
+          <Reasons recommendation={recommendation} />
           <div className="flex flex-wrap gap-3">
             <form action={acceptOutfit}>
               {hidden}
@@ -148,6 +149,41 @@ export function RecommendationView({
           옷장에 {recommendation.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가)
           부족해서 {basis ? "이 일정에 맞는 " : ""}코디를 만들 수 없어요.
         </p>
+      )}
+    </section>
+  );
+}
+
+const FACTOR_NAMES: Record<Factor, string> = {
+  weather: "날씨",
+  event: "일정",
+  color: "색상 조합",
+  style: "스타일",
+  preference: "취향",
+  recency: "최근 착용",
+  utilization: "활용도",
+};
+
+// The 추천 이유, one short line each.
+function Reasons({
+  recommendation: { reasons, missing },
+}: {
+  recommendation: Extract<Recommendation, { status: "ok" }>;
+}) {
+  if (!reasons.length) return null;
+  return (
+    <section aria-label="추천 이유" className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">추천 이유</h3>
+      <ul className="flex flex-col gap-1 text-sm">
+        {reasons.map(({ evidence, sentence }) => (
+          <li key={evidence.factor} className="flex gap-2">
+            <span className="w-16 shrink-0 text-zinc-500">{FACTOR_NAMES[evidence.factor]}</span>
+            <span>{sentence}</span>
+          </li>
+        ))}
+      </ul>
+      {missing.includes("reasons-llm-failed") && (
+        <p className="text-xs text-zinc-500">추천 이유를 다듬지 못해 기본 문장으로 보여 드려요.</p>
       )}
     </section>
   );

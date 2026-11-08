@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SEOUL, createTestOutfit } from "./testing/harness";
+import { FAKE_SENTENCE, SEOUL, createTestOutfit } from "./testing/harness";
 
 const DATE = "2026-11-10";
 
@@ -729,7 +729,7 @@ describe("일정 분석", () => {
       baseEvent: { id: meeting.id },
       basis: { kind: "work", formality: "semi-formal" },
       outfit: { top: shirt, bottom: slacks, shoes: loafers },
-      missing: ["llm-failed", "no-forecast"],
+      missing: ["llm-failed", "no-forecast", "reasons-llm-failed"],
     });
   });
 
@@ -750,6 +750,140 @@ describe("일정 분석", () => {
 
     const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
-    expect(result).toMatchObject({ status: "ok", basis: null, missing: ["llm-failed", "no-forecast"] });
+    expect(result).toMatchObject({ status: "ok", basis: null, missing: ["llm-failed", "no-forecast", "reasons-llm-failed"] });
+  });
+});
+
+describe("추천 이유", () => {
+  async function connectedMinji() {
+    const outfit = await createTestOutfit();
+    const minji = await outfit.createUser("minji@gmail.com");
+    outfit.calendar.connect(minji, ["personal"]);
+    return { ...outfit, minji };
+  }
+
+  test("the reasons are the factors that added most to the score, each with its clothes and facts", async () => {
+    const { recommender, calendar, llm, weather, addClothes, minji } = await connectedMinji();
+    // One piece per slot, so the 코디 is fixed. Every piece suits the 5°C day
+    // and the formal 결혼식 perfectly, and none was ever worn, while the red
+    // top and the blue slacks clash.
+    const [top, slacks, shoes, coat] = await addClothes(minji, [
+      { name: "빨간 블라우스", slot: "top", color: "red", formality: "formal", warmth: 3 },
+      { name: "파란 정장 바지", slot: "bottom", color: "blue", formality: "formal", warmth: 3 },
+      { name: "구두", slot: "shoes", formality: "formal", warmth: 3 },
+      { name: "울 코트", slot: "outer", formality: "formal", warmth: 2, material: "wool" },
+    ]);
+    weather.setForecast(DATE, { temperature: 5, rain: false });
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "사촌 결혼식",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T14:00:00+09:00`,
+    });
+    llm.judge("사촌 결혼식", { kind: "wedding", formality: "formal" });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.outfit).toEqual({ top, bottom: slacks, shoes, outer: coat });
+    expect(result.reasons.map((r) => r.evidence.factor).sort()).toEqual(["event", "recency", "weather"]);
+    const evidence = (factor: string) => result.reasons.find((r) => r.evidence.factor === factor)!.evidence;
+    expect(evidence("weather")).toMatchObject({
+      facts: { temperature: 5, rain: false },
+      clothes: expect.arrayContaining([coat]),
+    });
+    expect(evidence("event")).toMatchObject({
+      facts: { kind: "wedding", formality: "formal", title: "사촌 결혼식" },
+      clothes: expect.arrayContaining([top, slacks, shoes, coat]),
+    });
+    expect(evidence("recency")).toMatchObject({
+      clothes: expect.arrayContaining([top, slacks, shoes, coat]),
+    });
+  });
+
+  test("without weather or 일정, matching colors and preferences are among the reasons", async () => {
+    const { recommender, wardrobe, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    // Neutral colors throughout, all in the color minji likes, none ever worn.
+    const [tee, jeans, sneakers] = await addClothes(minji, [
+      { name: "네이비 티셔츠", slot: "top", color: "navy" },
+      { name: "네이비 바지", slot: "bottom", color: "navy" },
+      { name: "네이비 운동화", slot: "shoes", color: "navy" },
+    ]);
+    await wardrobe.setPreferences(minji, { colors: ["navy"], styles: [] });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.reasons.map((r) => r.evidence.factor).sort()).toEqual(["color", "preference", "recency"]);
+    const evidence = (factor: string) => result.reasons.find((r) => r.evidence.factor === factor)!.evidence;
+    expect(evidence("color")).toMatchObject({ facts: { colors: ["navy"], accents: [] } });
+    expect(evidence("preference")).toMatchObject({
+      clothes: expect.arrayContaining([tee, jeans, sneakers]),
+      facts: { colors: ["navy"], styles: [] },
+    });
+  });
+
+  test("the LLM is given only the 근거, and writes a sentence for each", async () => {
+    const { recommender, llm, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    await addClothes(minji, [
+      { name: "맨투맨", slot: "top", warmth: 3 },
+      { name: "청바지", slot: "bottom", warmth: 3 },
+      { name: "운동화", slot: "shoes", warmth: 3 },
+    ]);
+    weather.setForecast(DATE, { temperature: 5, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.reasons.length).toBeGreaterThanOrEqual(2);
+    expect(result.reasons.length).toBeLessThanOrEqual(3);
+    expect(llm.reasonRequests).toEqual([result.reasons.map((r) => r.evidence)]);
+    for (const reason of result.reasons) expect(reason.sentence.startsWith(FAKE_SENTENCE)).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  test("when the LLM cannot write sentences, each 근거 gets a template sentence, saying so", async () => {
+    const { recommender, llm, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , , coat] = await addClothes(minji, [
+      { name: "맨투맨", slot: "top", warmth: 3 },
+      { name: "청바지", slot: "bottom", warmth: 3 },
+      { name: "운동화", slot: "shoes", warmth: 3 },
+      { name: "패딩", slot: "outer", warmth: 2 },
+    ]);
+    weather.setForecast(DATE, { temperature: 5, rain: false });
+    llm.failWith();
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.missing).toEqual(["reasons-llm-failed"]);
+    expect(result.reasons.length).toBeGreaterThanOrEqual(2);
+    expect(result.reasons.length).toBeLessThanOrEqual(3);
+    for (const reason of result.reasons) {
+      expect(reason.sentence.trim()).not.toBe("");
+      expect(reason.sentence.startsWith(FAKE_SENTENCE)).toBe(false);
+    }
+    expect(result.reasons.find((r) => r.evidence.factor === "weather")?.evidence).toMatchObject({
+      facts: { temperature: 5 },
+      clothes: expect.arrayContaining([coat]),
+    });
+  });
+
+  test("an outfit that cannot be made has no reasons, and the LLM is not asked for any", async () => {
+    const { recommender, llm, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    await addClothes(minji, [{ name: "티셔츠", slot: "top" }]);
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).not.toHaveProperty("reasons");
+    expect(llm.reasonRequests).toEqual([]);
   });
 });
