@@ -425,7 +425,7 @@ describe("캘린더 일정", () => {
 
     const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
-    expect(result.events).toEqual([workshop, meeting, dinner]);
+    expect(result.events).toMatchObject([workshop, meeting, dinner]);
     expect(workshop.allDay).toBe(true);
   });
 
@@ -530,5 +530,226 @@ describe("캘린더 일정", () => {
       basis: { kind: "work", formality: "semi-formal" },
       missing: ["no-forecast"],
     });
+  });
+});
+
+describe("일정 분석", () => {
+  async function connectedMinji() {
+    const outfit = await createTestOutfit();
+    const minji = await outfit.createUser("minji@gmail.com");
+    outfit.calendar.connect(minji, ["personal"]);
+    return { ...outfit, minji };
+  }
+
+  test("a 결혼식 is judged a formal 결혼식, and formal clothes are chosen for it", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    const [, shirt, , slacks, , dressShoes] = await addClothes(minji, [
+      { name: "후드티", slot: "top", formality: "casual" },
+      { name: "흰 셔츠", slot: "top", formality: "formal" },
+      { name: "청바지", slot: "bottom", formality: "casual" },
+      { name: "정장 바지", slot: "bottom", formality: "formal" },
+      { name: "운동화", slot: "shoes", formality: "casual" },
+      { name: "구두", slot: "shoes", formality: "formal" },
+    ]);
+    const wedding = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "사촌 결혼식",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T14:00:00+09:00`,
+    });
+    llm.judge("사촌 결혼식", { kind: "wedding", formality: "formal" });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      events: [{ ...wedding, judgement: { kind: "wedding", formality: "formal" } }],
+      baseEvent: { id: wedding.id },
+      basis: { kind: "wedding", formality: "formal" },
+      outfit: { top: shirt, bottom: slacks, shoes: dressShoes },
+      missing: ["no-forecast"],
+    });
+  });
+
+  test("on a day with 출근 and a 결혼식, the 결혼식 is the 기준 일정", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    await addClothes(minji, [
+      { name: "셔츠", slot: "top", formality: "formal" },
+      { name: "정장 바지", slot: "bottom", formality: "formal" },
+      { name: "구두", slot: "shoes", formality: "formal" },
+    ]);
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "출근",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T12:00:00+09:00`,
+    });
+    const wedding = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "동기 결혼식",
+      start: `${DATE}T18:00:00+09:00`,
+      end: `${DATE}T20:00:00+09:00`,
+      location: "부산광역시 해운대구",
+    });
+    llm.judge("출근", { kind: "work", formality: "semi-formal" });
+    llm.judge("동기 결혼식", { kind: "wedding", formality: "formal" });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({
+      events: [
+        { title: "출근", judgement: { kind: "work", formality: "semi-formal" } },
+        { title: "동기 결혼식", judgement: { kind: "wedding", formality: "formal" } },
+      ],
+      baseEvent: { id: wedding.id },
+      basis: { kind: "wedding", formality: "formal" },
+      weatherPlace: "부산",
+    });
+  });
+
+  test("clothes far from the formality of the day's other 일정 are chosen less than otherwise equal clothes", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    // No semi-formal shoes for 출근: formal and casual shoes are equally one
+    // level off, but formal shoes are two levels off the 운동 later.
+    const [, , , sneakers] = await addClothes(minji, [
+      { name: "셔츠", slot: "top", formality: "semi-formal" },
+      { name: "슬랙스", slot: "bottom", formality: "semi-formal" },
+      { name: "구두", slot: "shoes", formality: "formal" },
+      { name: "운동화", slot: "shoes", formality: "casual" },
+    ]);
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "출근",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T18:00:00+09:00`,
+    });
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "헬스",
+      start: `${DATE}T19:00:00+09:00`,
+      end: `${DATE}T20:00:00+09:00`,
+    });
+    llm.judge("출근", { kind: "work", formality: "semi-formal" });
+    llm.judge("헬스", { kind: "workout", formality: "casual" });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({
+      basis: { kind: "work", formality: "semi-formal" },
+      outfit: { shoes: sneakers },
+    });
+  });
+
+  test("the user's picked situation does not replace the judged 일정", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    await addClothes(minji, [
+      { name: "셔츠", slot: "top", formality: "formal" },
+      { name: "정장 바지", slot: "bottom", formality: "formal" },
+      { name: "구두", slot: "shoes", formality: "formal" },
+    ]);
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "최종 면접",
+      start: `${DATE}T10:00:00+09:00`,
+      end: `${DATE}T11:00:00+09:00`,
+    });
+    llm.judge("최종 면접", { kind: "interview", formality: "formal" });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: "workout", location: SEOUL });
+
+    expect(result).toMatchObject({ basis: { kind: "interview", formality: "formal" } });
+  });
+
+  test("the LLM is told each 일정's title, 메모 and 장소, and nothing else", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "팀 회식",
+      start: `${DATE}T19:00:00+09:00`,
+      end: `${DATE}T21:00:00+09:00`,
+      location: "강남역 고깃집",
+      description: "김부장, 이대리 참석",
+    });
+    calendar.addEvent(minji, { calendarId: "personal", title: "휴가", start: DATE, end: "2026-11-11" });
+    llm.judge("팀 회식", { kind: "appointment", formality: "casual" });
+    llm.judge("휴가", { kind: "appointment", formality: "casual" });
+
+    await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(llm.judgeRequests).toEqual([
+      [
+        { title: "휴가", description: null, location: null },
+        { title: "팀 회식", description: "김부장, 이대리 참석", location: "강남역 고깃집" },
+      ],
+    ]);
+  });
+
+  test("a day without 일정 asks the LLM nothing", async () => {
+    const { recommender, llm, addClothes, minji } = await connectedMinji();
+    await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(llm.judgeRequests).toEqual([]);
+    expect(result.missing).toEqual(["no-forecast"]);
+  });
+
+  test("when the LLM fails, the outfit comes for the picked situation, saying the LLM failed", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    const [, shirt, , slacks, , loafers] = await addClothes(minji, [
+      { name: "후드티", slot: "top", formality: "casual" },
+      { name: "셔츠", slot: "top", formality: "semi-formal" },
+      { name: "조거팬츠", slot: "bottom", formality: "casual" },
+      { name: "슬랙스", slot: "bottom", formality: "semi-formal" },
+      { name: "운동화", slot: "shoes", formality: "casual" },
+      { name: "로퍼", slot: "shoes", formality: "semi-formal" },
+    ]);
+    const meeting = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "주간 회의",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T10:00:00+09:00`,
+    });
+    llm.failWith();
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: "work", location: SEOUL });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      events: [{ id: meeting.id, judgement: null }],
+      baseEvent: { id: meeting.id },
+      basis: { kind: "work", formality: "semi-formal" },
+      outfit: { top: shirt, bottom: slacks, shoes: loafers },
+      missing: ["llm-failed", "no-forecast"],
+    });
+  });
+
+  test("when the LLM fails and no situation was picked, the outfit still comes, for 일정 없음", async () => {
+    const { recommender, calendar, llm, addClothes, minji } = await connectedMinji();
+    await addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "주간 회의",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T10:00:00+09:00`,
+    });
+    llm.failWith();
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", basis: null, missing: ["llm-failed", "no-forecast"] });
   });
 });

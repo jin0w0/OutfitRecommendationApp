@@ -1,4 +1,4 @@
-import type { CalendarEvent, Outfit, Recommendation } from "@/lib/outfit/recommender";
+import type { DayEvent, Outfit, Recommendation } from "@/lib/outfit/recommender";
 import { acceptOutfit, cancelAcceptance } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
@@ -152,8 +152,8 @@ export function RecommendationView({
   );
 }
 
-// The day's 일정 from the calendar, with the 기준 일정 marked, or why they
-// could not be read. Nothing for a user without 캘린더 연동 and no 일정.
+// The day's 일정 from the calendar, each with its judged 일정의 종류 and 격식
+// 수준 and the 기준 일정 marked, or why they could not be read or judged. Nothing for a user without 캘린더 연동 and no 일정.
 function EventList({
   recommendation: { events, baseEvent, missing },
 }: {
@@ -168,31 +168,43 @@ function EventList({
   }
   if (!events.length) return null;
   return (
-    <ul aria-label="이날의 일정" className="flex flex-col gap-2">
-      {events.map((event) => (
-        <li
-          key={`${event.calendarId}/${event.id}`}
-          className="flex flex-col rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800"
-        >
-          <span className="flex items-center gap-2 font-medium">
-            {event.title}
-            {event === baseEvent && (
-              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                기준 일정
+    <>
+      {missing.includes("llm-failed") && (
+        <p className="rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          일정의 종류와 격식을 판단하지 못해 일정은 반영하지 않고 추천했어요.
+        </p>
+      )}
+      <ul aria-label="이날의 일정" className="flex flex-col gap-2">
+        {events.map((event) => (
+          <li
+            key={`${event.calendarId}/${event.id}`}
+            className="flex flex-col rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800"
+          >
+            <span className="flex items-center gap-2 font-medium">
+              {event.title}
+              {event === baseEvent && (
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                  기준 일정
+                </span>
+              )}
+            </span>
+            <span className="text-zinc-600 dark:text-zinc-400">
+              {eventTime(event)}
+              {event.location && ` · ${event.location}`}
+            </span>
+            {event.judgement && (
+              <span className="text-zinc-600 dark:text-zinc-400">
+                {EVENT_KINDS[event.judgement.kind].name} · {FORMALITY_NAMES[event.judgement.formality]}
               </span>
             )}
-          </span>
-          <span className="text-zinc-600 dark:text-zinc-400">
-            {eventTime(event)}
-            {event.location && ` · ${event.location}`}
-          </span>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
-function eventTime(event: CalendarEvent) {
+function eventTime(event: DayEvent) {
   if (event.allDay) return "종일";
   const time = (iso: string) =>
     new Intl.DateTimeFormat("ko-KR", {
