@@ -167,4 +167,22 @@ describe("격식 충돌 경고", () => {
       },
     ]);
   });
+
+  test("an outfit made less formal than its 결혼식 loses 일정 score, and no 추천 이유 says it suits the 결혼식", async () => {
+    const { recommender, minji, first } = await minjiFor("wedding");
+    expect(first).toMatchObject({ status: "ok", scores: { event: 1 } });
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 캐주얼하게" });
+
+    expect(revised.status).toBe("ok");
+    if (revised.status !== "ok") return;
+    expect(revised.scores.event).toBeLessThan(1);
+    for (const { evidence } of revised.reasons) {
+      if (evidence.factor !== "event") continue;
+      // What the 근거 says of the 일정 is the 일정's own 종류 and 격식 수준,
+      // and only clothes at that 격식 수준 are said to suit it.
+      expect(evidence.facts).toMatchObject({ kind: "wedding", formality: "formal" });
+      expect(evidence.clothes.every((c) => c.formality === "formal")).toBe(true);
+    }
+  });
 });

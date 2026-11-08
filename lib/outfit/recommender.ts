@@ -186,8 +186,9 @@ export type Factor = keyof Scores;
 export type Evidence =
   // The day's weather, and the pieces that suit it (any 아우터 among them).
   | { factor: "weather"; clothes: Clothing[]; facts: Weather }
-  // The 기준 일정 (or picked situation, untitled), and the pieces at the 격식 수준 the
-  // 코디 was chosen at: the 일정's, or the one 대화로 수정하기 asked for.
+  // The 기준 일정 (or picked situation, untitled) with its own 종류 and 격식
+  // 수준, and the pieces at that 격식 수준, even when 대화로 수정하기 asked
+  // for another.
   | { factor: "event"; clothes: Clothing[]; facts: Basis & { title: string | null } }
   // Every color of the 코디, and those of them that are not neutral.
   | { factor: "color"; clothes: Clothing[]; facts: { colors: string[]; accents: string[] } }
@@ -598,7 +599,7 @@ export function createOutfitRecommender({
   ): Promise<Chosen> {
     const missing = [...day.missing];
     const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
-    const scoring = await scoringFacts(userId, day, formality);
+    const scoring = await scoringFacts(userId, day);
     const { clothes, candidates } = outfitsUnder(wardrobeClothes, day.weather, formality, conditions);
     const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
     const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
@@ -627,13 +628,14 @@ export function createOutfitRecommender({
       : null;
   }
 
-  // What every 코디 for the day is scored against, with clothes wanted at
-  // `formality`.
-  async function scoringFacts(userId: string, day: Day, formality: Formality | null): Promise<ScoringFacts> {
+  // What every 코디 for the day is scored against. The 일정 score is always
+  // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
+  // 격식 수준: the clothes are chosen at that one, but are not said to suit
+  // the 일정 better than they do.
+  async function scoringFacts(userId: string, day: Day): Promise<ScoringFacts> {
     const { events, baseEvent, basis, weather, date } = day;
     return {
       basis,
-      formality,
       basisTitle: baseEvent?.judgement ? baseEvent.title : null,
       // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
       otherFormalities: events.flatMap((event) =>
@@ -876,9 +878,6 @@ function changesBetween(before: Chosen, after: Chosen, conditions: RevisionCondi
 // What a 코디 is scored against.
 type ScoringFacts = {
   basis: Basis | null;
-  // The 격식 수준 the clothes should have: the basis's, or the one 대화로
-  // 수정하기 asked for instead.
-  formality: Formality | null;
   // The 기준 일정's title when the basis is its judgement, else null.
   basisTitle: string | null;
   // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
@@ -891,7 +890,7 @@ type ScoringFacts = {
 
 function score(
   outfit: Outfit,
-  { basis, formality, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+  { basis, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
 ): Scores {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -902,8 +901,8 @@ function score(
     recency: average(items.map((c) => Math.min(days(c), RECENT_DAYS) / RECENT_DAYS)),
     utilization: average(items.map((c) => Math.min(days(c), LONG_UNWORN_DAYS) / LONG_UNWORN_DAYS)),
   };
-  if (basis && formality) {
-    scores.event = average(items.map((c) => eventFit(c, formality, otherFormalities)));
+  if (basis) {
+    scores.event = average(items.map((c) => eventFit(c, basis.formality, otherFormalities)));
   }
   if (weather) {
     scores.weather = average(items.map((c) => weatherFit(c, weather)));
@@ -933,7 +932,7 @@ function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evi
 function evidenceFor(
   factor: Factor,
   outfit: Outfit,
-  { basis, formality, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+  { basis, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
 ): Evidence | null {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -947,11 +946,11 @@ function evidenceFor(
         facts: { temperature: weather.temperature, rain: weather.rain },
       };
     case "event":
-      if (!basis || !formality) return null;
+      if (!basis) return null;
       return {
         factor,
-        clothes: items.filter((c) => eventFit(c, formality, otherFormalities) === 1),
-        facts: { kind: basis.kind, formality, title: basisTitle },
+        clothes: items.filter((c) => eventFit(c, basis.formality, otherFormalities) === 1),
+        facts: { kind: basis.kind, formality: basis.formality, title: basisTitle },
       };
     case "color": {
       const colors = [...new Set(items.map((c) => c.color))];
