@@ -94,10 +94,12 @@ export type RevisionCondition =
   | { type: "exclude"; clothing: Clothing }
   | { type: "keep"; clothing: Clothing };
 
-// A 수정 조건 as the LLM answers it, naming pieces by clothing id.
+// A 수정 조건 as the LLM answers it, naming pieces by clothing id, or
+// off-topic for a message that has nothing to do with the 코디 (무관한 메시지).
 export type AskedCondition =
   | Extract<RevisionCondition, { type: "style" | "color" }>
-  | { type: "exclude" | "keep"; clothingId: string };
+  | { type: "exclude" | "keep"; clothingId: string }
+  | { type: "off-topic" };
 
 export type StyleDirection = "casual" | "formal";
 export type ColorDirection = "lighter" | "darker";
@@ -113,9 +115,24 @@ export type OutfitChange = {
 };
 
 // What makes a 추천 결과 a 수정 결과: the message, every 수정 조건 asked for
-// in the session so far (a later one replacing any it conflicts with), and how
-// the 코디 differs from the one before.
-export type Revision = { message: string; conditions: RevisionCondition[]; changes: OutfitChange[] };
+// in the session so far (a later one replacing any it conflicts with), how
+// the 코디 differs from the one before, and what the user should be warned of
+// about the 수정, which went ahead anyway.
+export type Revision = {
+  message: string;
+  conditions: RevisionCondition[];
+  changes: OutfitChange[];
+  warnings: RevisionWarning[];
+};
+
+// Something about a 수정 the user should know although it was made.
+//   formality-conflict: these 수정 조건 take the 코디 away from the 격식 수준
+//     of the 일정 it is for (the 기준 일정, or the situation picked)
+export type RevisionWarning = {
+  type: "formality-conflict";
+  basis: Basis;
+  conditions: RevisionCondition[];
+};
 
 // One of the day's 일정 with what was judged of it, or null when it could not
 // be judged.
@@ -274,7 +291,21 @@ type Chosen = RecommendationContext &
 export type Recommendation = Step & {
   // The 추천 세션 this result is a step of, for 대화로 수정하기.
   sessionId: string;
+  // Which step of the 추천 세션 this is: 0 for 날짜로 추천받기, then one more
+  // per 수정. Every earlier step can be gone back to (되돌리기).
+  step: number;
+  // The 대화 message just sent that changed nothing, and why, or null.
+  unapplied: UnappliedRevision | null;
 };
+
+// A 대화 message that left the 코디 as it was.
+//   unbuildable: 구성 불가. The 옷장 has no 코디 that meets `unmet` together
+//     with the other 수정 조건 kept so far; `missingSlots` are the slots left
+//     without clothes.
+//   off-topic: 무관한 메시지. It asked nothing of the 코디.
+export type UnappliedRevision =
+  | { reason: "unbuildable"; message: string; unmet: RevisionCondition[]; missingSlots: Slot[] }
+  | { reason: "off-topic"; message: string };
 
 // How much of the 일정 score a piece loses when it is two 격식 수준 off every
 // other 일정 of the day. Less than a level's worth, so the 기준 일정 comes first.
@@ -409,7 +440,7 @@ export function createOutfitRecommender({
         shown,
       });
       const sessionId = await sessions.start<Step>(userId, date, { ...step, revision: null });
-      return { ...step, sessionId, revision: null };
+      return { ...step, sessionId, step: 0, revision: null, unapplied: null };
     },
 
     // 대화로 수정하기: the 코디 of the session's latest step, changed as
@@ -429,6 +460,8 @@ export function createOutfitRecommender({
       if (!session) throw new Error("No such 추천 세션");
       const first = session.steps[0];
       const last = session.steps.at(-1)!;
+      // The latest step, left as it was.
+      const unchanged = { ...last, sessionId, step: session.steps.length - 1 };
       const wardrobeClothes = await wardrobe.clothes(userId);
       let asked: RevisionCondition[];
       try {
@@ -441,17 +474,41 @@ export function createOutfitRecommender({
           wardrobeClothes,
         );
       } catch {
-        return { ...last, sessionId, missing: [...last.missing, "revision-llm-failed"] };
+        return { ...unchanged, missing: [...last.missing, "revision-llm-failed"], unapplied: null };
       }
-      const conditions = accumulate(last.revision?.conditions ?? [], asked);
-      const step = await recommend(userId, dayOf(first), wardrobeClothes, {
-        formality: shifted(anchorFormality(first), conditions),
+      // Nothing asked of the 코디 (or only of pieces the 옷장 does not have):
+      // the user is asked to talk about the 코디 instead.
+      if (!asked.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
+      const earlier = last.revision?.conditions ?? [];
+      const conditions = accumulate(earlier, asked);
+      const day = dayOf(first);
+      const anchor = anchorFormality(first);
+      const under = (some: RevisionCondition[]) =>
+        outfitsUnder(wardrobeClothes, day.weather, shifted(anchor, some), some);
+      const { clothes, candidates } = under(conditions);
+      if (!candidates.length) {
+        // The conditions that could be met were it not for them, else every
+        // one this message added.
+        const blocking = conditions.filter((c) => under(conditions.filter((other) => other !== c)).candidates.length);
+        const unmet = blocking.length ? blocking : conditions.filter((c) => !earlier.includes(c));
+        return {
+          ...unchanged,
+          unapplied: { reason: "unbuildable", message, unmet, missingSlots: missingSlots(clothes) },
+        };
+      }
+      const step = await recommend(userId, day, wardrobeClothes, {
+        formality: shifted(anchor, conditions),
         conditions,
         shown: [],
       });
-      const revision: Revision = { message, conditions, changes: changesBetween(last, step, conditions) };
+      const revision: Revision = {
+        message,
+        conditions,
+        changes: changesBetween(last, step, conditions),
+        warnings: warningsFor(first, conditions),
+      };
       await sessions.saveSteps<Step>(userId, sessionId, [...session.steps, { ...step, revision }]);
-      return { ...step, sessionId, revision };
+      return { ...step, sessionId, step: session.steps.length, revision, unapplied: null };
     },
 
     // The 추천 결과 of the session's latest step as it was returned, with the
@@ -461,7 +518,34 @@ export function createOutfitRecommender({
       const session = await sessions.get<Step>(userId, sessionId);
       if (!session) return null;
       const last = session.steps.at(-1)!;
-      return { ...last, sessionId, accepted: await acceptedOn(userId, last.date, await wardrobe.clothes(userId)) };
+      return {
+        ...last,
+        sessionId,
+        step: session.steps.length - 1,
+        accepted: await acceptedOn(userId, last.date, await wardrobe.clothes(userId)),
+        unapplied: null,
+      };
+    },
+
+    // 되돌리기: the session goes back to its step `step` (0 for the first
+    // 추천), with that step's 코디 and 수정 조건; the steps after it are
+    // dropped, and later 수정 build on it.
+    async undo({ userId, sessionId, step }: { userId: string; sessionId: string; step: number }): Promise<Recommendation> {
+      const session = await sessions.get<Step>(userId, sessionId);
+      if (!session) throw new Error("No such 추천 세션");
+      if (!Number.isInteger(step) || step < 0 || step >= session.steps.length) {
+        throw new Error("No such step in the 추천 세션");
+      }
+      const steps = session.steps.slice(0, step + 1);
+      await sessions.saveSteps<Step>(userId, sessionId, steps);
+      const back = steps[step];
+      return {
+        ...back,
+        sessionId,
+        step,
+        accepted: await acceptedOn(userId, back.date, await wardrobe.clothes(userId)),
+        unapplied: null,
+      };
     },
 
     // "입을게요": the user will wear these clothes on `date`. Replaces any 코디
@@ -510,15 +594,7 @@ export function createOutfitRecommender({
     const missing = [...day.missing];
     const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
     const scoring = await scoringFacts(userId, day, formality);
-    const kept = wardrobeClothes.filter((c) =>
-      conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
-    );
-    const clothes = conditioned(wardrobeClothes, formality, conditions);
-    const needsOuter =
-      (day.weather !== null && day.weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
-    const candidates = candidateOutfits(clothes, needsOuter).filter((outfit) =>
-      kept.every((c) => Object.values(outfit).includes(c)),
-    );
+    const { clothes, candidates } = outfitsUnder(wardrobeClothes, day.weather, formality, conditions);
     const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
     const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
     const best = maxBy(
@@ -596,6 +672,25 @@ export function createOutfitRecommender({
     }
     return days;
   }
+}
+
+// Every 코디 the 옷장 can make for the day at `formality` under the 수정 조건,
+// and the clothes they may be made of.
+function outfitsUnder(
+  wardrobeClothes: Clothing[],
+  weather: Weather | null,
+  formality: Formality | null,
+  conditions: RevisionCondition[],
+) {
+  const kept = wardrobeClothes.filter((c) =>
+    conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
+  );
+  const clothes = conditioned(wardrobeClothes, formality, conditions);
+  const needsOuter = (weather !== null && weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
+  const candidates = candidateOutfits(clothes, needsOuter).filter((outfit) =>
+    kept.every((c) => Object.values(outfit).includes(c)),
+  );
+  return { clothes, candidates };
 }
 
 function outfitKey(outfit: Outfit) {
@@ -678,9 +773,11 @@ function conditioned(clothes: Clothing[], formality: Formality | null, condition
 }
 
 // The 수정 조건 the LLM answered, with the pieces they name from the 옷장.
-// Conditions naming a piece the 옷장 does not have are dropped.
+// Conditions naming a piece the 옷장 does not have are dropped, as is
+// off-topic, which asks nothing of the 코디.
 function resolved(asked: AskedCondition[], wardrobe: Clothing[]): RevisionCondition[] {
   return asked.flatMap((c): RevisionCondition[] => {
+    if (c.type === "off-topic") return [];
     if (c.type === "style" || c.type === "color") return [c];
     const clothing = wardrobe.find(({ id }) => id === c.clothingId);
     return clothing ? [{ type: c.type, clothing }] : [];
@@ -723,6 +820,20 @@ function shifted(formality: Formality | null, conditions: RevisionCondition[]): 
   const level = FORMALITY_LEVEL[formality] + (style.direction === "casual" ? -1 : 1);
   const levels = Object.keys(FORMALITY_LEVEL) as Formality[];
   return levels[Math.min(Math.max(level, 0), levels.length - 1)];
+}
+
+// The 격식 충돌 of the 수정 조건 with the 일정 the session's 코디 is for: a
+// 스타일 방향 that moves the 코디 off its 격식 수준, and kept pieces of
+// another 격식 수준.
+function warningsFor(first: Step, conditions: RevisionCondition[]): RevisionWarning[] {
+  const { basis } = first;
+  if (!basis) return [];
+  const clashing = conditions.filter((c) => {
+    if (c.type === "style") return shifted(basis.formality, [c]) !== basis.formality;
+    if (c.type === "keep") return c.clothing.formality !== basis.formality;
+    return false;
+  });
+  return clashing.length ? [{ type: "formality-conflict", basis, conditions: clashing }] : [];
 }
 
 const SLOTS: (keyof Outfit)[] = ["outer", "top", "bottom", "dress", "shoes"];

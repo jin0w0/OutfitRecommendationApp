@@ -8,6 +8,7 @@ import { isEventKind } from "@/lib/outfit/situations";
 import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
 import { OutfitRequestForm, RecommendationView } from "./recommendation";
+import { isSlot, type RevisionNotice } from "./revision-labels";
 
 export default function Home({ searchParams }: PageProps<"/home">) {
   return (
@@ -63,10 +64,27 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         regionName={regionName}
         situation={situation}
         shown={shown}
-        revisionFailed={params.revisionFailed === "1"}
+        notice={continued ? revisionNotice(params) : null}
       />
     </>
   );
+}
+
+// What the last 대화 message changed nothing for, as reviseOutfit put it in the URL.
+function revisionNotice(params: Record<string, string | string[] | undefined>): RevisionNotice | null {
+  switch (params.notice) {
+    case "revision-failed":
+    case "off-topic":
+      return { type: params.notice };
+    case "unbuildable":
+      return {
+        type: "unbuildable",
+        unmet: [params.unmet ?? []].flat(),
+        missingSlots: [params.missingSlot ?? []].flat().filter(isSlot),
+      };
+    default:
+      return null;
+  }
 }
 
 function UserBar({ user }: { user: CurrentUser }) {
