@@ -1,15 +1,17 @@
 import type { ReactNode } from "react";
-import type {
-  DayEvent,
-  Factor,
-  Outfit,
-  Recommendation,
-  Revision,
-  RevisionCondition,
-} from "@/lib/outfit/recommender";
+import type { DayEvent, Factor, Outfit, Recommendation, Revision } from "@/lib/outfit/recommender";
 import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit, undoRevision } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
-import { SLOT_NAMES, conditionLabel, type RevisionNotice } from "./revision-labels";
+import {
+  SLOT_NAMES,
+  conditionKey,
+  conditionLabel,
+  noticeText,
+  shownParams,
+  slotNames,
+  undoTargets,
+  type RevisionNotice,
+} from "./home-state";
 
 const SLOT_ORDER: (keyof Outfit)[] = ["outer", "top", "bottom", "dress", "shoes"];
 
@@ -136,13 +138,7 @@ export function RecommendationView({
             {/* Plain GET form: the 코디 shown so far live in the URL. */}
             <form action="/home">
               {hidden}
-              {[
-                ...new Set(
-                  [...shown, Object.values(recommendation.outfit).map((c) => c.id)].map((ids) =>
-                    ids.join("."),
-                  ),
-                ),
-              ].map((value) => (
+              {shownParams([...shown, Object.values(recommendation.outfit).map((c) => c.id)]).map((value) => (
                 <input key={value} type="hidden" name="shown" value={value} />
               ))}
               <button
@@ -156,19 +152,20 @@ export function RecommendationView({
         </>
       ) : (
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          옷장에 {recommendation.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가)
+          옷장에 {slotNames(recommendation.missingSlots)}이(가)
           부족해서 {basis ? "이 일정에 맞는 " : ""}코디를 만들 수 없어요.
         </p>
       )}
       <RevisionForm hidden={inSession} notice={notice} />
-      {recommendation.step > 0 && <UndoButtons step={recommendation.step} hidden={inSession} />}
+      <UndoButtons step={recommendation.step} hidden={inSession} />
     </section>
   );
 }
 
 // 되돌리기: one step back, or back to the first 추천.
 function UndoButtons({ step, hidden }: { step: number; hidden: ReactNode }) {
-  const targets = step > 1 ? [step - 1, 0] : [0];
+  const targets = undoTargets(step);
+  if (!targets.length) return null;
   return (
     <div className="flex flex-wrap gap-3">
       {targets.map((target) => (
@@ -182,26 +179,6 @@ function UndoButtons({ step, hidden }: { step: number; hidden: ReactNode }) {
       ))}
     </div>
   );
-}
-
-// What to say when the last 대화 message changed nothing.
-function noticeText(notice: RevisionNotice) {
-  switch (notice.type) {
-    case "revision-failed":
-      return "요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.";
-    case "off-topic":
-      return "코디와 관련된 요청만 도와드릴 수 있어요. 예: 좀 더 캐주얼하게, 이 바지 말고 다른 걸로";
-    case "unknown-clothing":
-      return "말씀하신 옷을 옷장에서 찾지 못해 코디를 그대로 두었어요. 옷 이름으로 다시 말씀해 주세요.";
-    case "style-limit":
-      return `이 일정에서는 지금보다 더 ${notice.direction === "casual" ? "캐주얼하게" : "포멀하게"} 바꿀 수 없어요. 코디는 그대로 두었어요.`;
-    case "unbuildable": {
-      const slots = notice.missingSlots.length
-        ? ` (${notice.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가) 부족해요)`
-        : "";
-      return `옷장의 옷으로는 "${notice.unmet.join(", ")}" 조건을 만족하는 코디를 만들 수 없어요${slots}. 코디는 그대로 두었어요.`;
-    }
-  }
 }
 
 // 대화로 수정하기: a message about the 코디 above.
@@ -284,10 +261,6 @@ function RevisionSummary({ revision: { message, conditions, changes, warnings } 
       ))}
     </section>
   );
-}
-
-function conditionKey(condition: RevisionCondition) {
-  return "clothing" in condition ? `${condition.type}:${condition.clothing.id}` : condition.type;
 }
 
 const FACTOR_NAMES: Record<Factor, string> = {

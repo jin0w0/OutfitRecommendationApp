@@ -4,6 +4,7 @@
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
+import { todayInKorea } from "./dates";
 import type { Clothing, Formality, Slot, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
@@ -118,15 +119,15 @@ type RecommendationContext = {
 
 // What the day is, as 날짜로 추천받기 found it. Every 수정 in the session is
 // for the same day, until 일정 판단 직접 고치기 finds it again.
-type Day = Omit<RecommendationContext, "accepted">;
+type FoundDay = Omit<RecommendationContext, "accepted">;
 
 // A 추천 세션 step as stored: the 추천 결과, which is a 수정 결과 unless
 // `revision` is null (날짜로 추천받기's).
-type Step = Chosen & { revision: Revision | null };
+type Step = OutfitChoice & { revision: Revision | null };
 
 // The day of a session step, as stored. The 기준 일정 is the one among the
 // day's 일정 again, as it was returned.
-function dayOf(step: Step): Day {
+function dayOf(step: Step): FoundDay {
   const { date, situation, location, events, baseEvent, basis, weather, weatherPlace } = step;
   return {
     date,
@@ -156,7 +157,7 @@ const DAY_MISSING: MissingInfo[] = [
 export type Accepted = { status: WearStatus; clothes: Clothing[] } | null;
 
 // The 코디 chosen for the day, or why there is none.
-type Chosen = RecommendationContext &
+type OutfitChoice = RecommendationContext &
   (
     // `reasons`: the 추천 이유, from the factors that added most to the score.
     | { status: "ok"; outfit: Outfit; scores: Scores; reasons: Reason[] }
@@ -461,7 +462,7 @@ export function createOutfitRecommender({
     date: string,
     situation: EventKind | null,
     location: Coordinates,
-  ): Promise<Day> {
+  ): Promise<FoundDay> {
     const missing: MissingInfo[] = [];
     const calendarDay = await dayEvents(userId, date);
     if (calendarDay.failure) missing.push(calendarDay.failure);
@@ -488,14 +489,14 @@ export function createOutfitRecommender({
   // under the 수정 조건, and explained. Both entry points choose through this.
   async function recommend(
     userId: string,
-    day: Day,
+    day: FoundDay,
     wardrobeClothes: Clothing[],
     {
       formality,
       conditions,
       shown,
     }: { formality: Formality | null; conditions: RevisionCondition[]; shown: string[][] },
-  ): Promise<Chosen> {
+  ): Promise<OutfitChoice> {
     const missing = [...day.missing];
     const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
     const scoring = await scoringFacts(userId, day);
@@ -531,7 +532,7 @@ export function createOutfitRecommender({
   // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
   // 격식 수준: the clothes are chosen at that one, but are not said to suit
   // the 일정 better than they do.
-  async function scoringFacts(userId: string, day: Day): Promise<ScoringFacts> {
+  async function scoringFacts(userId: string, day: FoundDay): Promise<ScoringFacts> {
     const { events, baseEvent, basis, weather, date } = day;
     return {
       basis,
@@ -614,11 +615,6 @@ function daysBetween(from: string, to: string) {
   return (Date.parse(to) - Date.parse(from)) / 86_400_000;
 }
 
-function todayInKorea() {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
-}
-
 // 종일 일정 first, then by start time.
 function byStart(a: CalendarEvent, b: CalendarEvent) {
   const key = (e: CalendarEvent) => (e.allDay ? -Infinity : Date.parse(e.start));
@@ -675,7 +671,7 @@ function conditioned(clothes: Clothing[], formality: Formality | null, condition
 
 // The 격식 수준 a 스타일 방향 moves away from: the day's basis's, or, without
 // one, the one most of the session's first 코디 has.
-function anchorFormality(day: Day, first: Step): Formality | null {
+function anchorFormality(day: FoundDay, first: Step): Formality | null {
   if (day.basis) return day.basis.formality;
   if (first.status !== "ok") return null;
   const counts = new Map<Formality, number>();
