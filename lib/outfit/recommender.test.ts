@@ -215,7 +215,7 @@ describe("recommending for a situation the user picked", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.basis).toBeNull();
-    expect(result.scores).toEqual({ color: 1, style: 1, preference: 0 });
+    expect(result.scores).toEqual({ color: 1, style: 1, preference: 0, recency: 1, utilization: 1 });
   });
 });
 
