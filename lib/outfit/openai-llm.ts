@@ -39,8 +39,9 @@ const REVISION_INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자
 - color: 더 밝은 색으로(direction=lighter) 또는 더 어두운 색으로(direction=darker).
 - exclude: 이 옷은 빼 달라. clothingId에 그 옷의 id를 쓴다. "이 바지 말고", "바지만 바꿔줘"는 outfit의 그 바지를 뺀다.
 - keep: 이 옷은 꼭 입겠다. clothingId에 그 옷의 id를 쓴다.
+- off-topic: 코디 수정과 관계없는 말이다("오늘 점심 뭐 먹지?"). 이때는 이 조건 하나만 답한다.
 옷을 가리키는 말은 먼저 outfit에서, 없으면 wardrobe에서 찾는다. 어떤 옷인지 알 수 없으면 그 조건은 쓰지 않는다. 쓰지 않는 필드(direction 또는 clothingId)는 null로 둔다.
-사용자가 말한 순서대로 조건을 답한다. 코디 수정과 관계없는 말이면 빈 목록으로 답한다. 코디를 직접 고르지 않는다.`;
+사용자가 말한 순서대로 조건을 답한다. 코디를 직접 고르지 않는다.`;
 
 export function createOpenAiLanguageModel({
   apiKey,
@@ -111,7 +112,7 @@ export function createOpenAiLanguageModel({
               items: {
                 type: "object",
                 properties: {
-                  type: { type: "string", enum: ["style", "color", "exclude", "keep"] },
+                  type: { type: "string", enum: ["style", "color", "exclude", "keep", "off-topic"] },
                   direction: { type: ["string", "null"], enum: ["casual", "formal", "lighter", "darker", null] },
                   clothingId: { type: ["string", "null"] },
                 },
@@ -128,6 +129,7 @@ export function createOpenAiLanguageModel({
         if (type === "style" && (direction === "casual" || direction === "formal")) return { type, direction };
         if (type === "color" && (direction === "lighter" || direction === "darker")) return { type, direction };
         if ((type === "exclude" || type === "keep") && typeof clothingId === "string") return { type, clothingId };
+        if (type === "off-topic") return { type };
         throw new Error("The LLM answered outside the schema");
       });
     },

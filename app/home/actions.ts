@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { getOutfitRecommender } from "@/lib/outfit/server";
 import { isEventKind, isFormality } from "@/lib/outfit/situations";
+import { conditionLabel } from "./revision-labels";
 
 async function requireUserId() {
   const user = await getAccount().getCurrentUser(await headers());
@@ -20,27 +21,52 @@ function dateFrom(formData: FormData) {
 
 // Back to the same date and 일정 on the home screen, and to the same 추천 세션
 // when the form names one.
-function backHome(formData: FormData, date: string, extra: Record<string, string> = {}): never {
+function backHome(formData: FormData, date: string, extra: [string, string][] = []): never {
   const params = new URLSearchParams({ date });
   const situation = formData.get("situation");
   if (isEventKind(situation)) params.set("situation", situation);
   const session = formData.get("session");
   if (typeof session === "string" && session) params.set("session", session);
-  for (const [name, value] of Object.entries(extra)) params.set(name, value);
+  for (const [name, value] of extra) params.append(name, value);
   redirect(`/home?${params}`);
+}
+
+function sessionFrom(formData: FormData) {
+  const sessionId = formData.get("session");
+  if (typeof sessionId !== "string" || !sessionId) throw new Error("Invalid 추천 세션");
+  return sessionId;
 }
 
 // 대화로 수정하기, then back to the 추천 세션 to show the 수정 결과.
 export async function reviseOutfit(formData: FormData) {
   const userId = await requireUserId();
   const date = dateFrom(formData);
-  const sessionId = formData.get("session");
+  const sessionId = sessionFrom(formData);
   const message = String(formData.get("message") ?? "").trim();
-  if (typeof sessionId !== "string" || !sessionId) throw new Error("Invalid 추천 세션");
   if (!message) backHome(formData, date);
   const revised = await getOutfitRecommender().revise({ userId, sessionId, message });
-  // The session keeps no step for a message the LLM could not read, so say so here.
-  backHome(formData, date, revised.missing.includes("revision-llm-failed") ? { revisionFailed: "1" } : {});
+  // The session keeps no step for a message that changed nothing, so say why here.
+  const { unapplied } = revised;
+  if (revised.missing.includes("revision-llm-failed")) backHome(formData, date, [["notice", "revision-failed"]]);
+  if (unapplied?.reason === "off-topic") backHome(formData, date, [["notice", "off-topic"]]);
+  if (unapplied?.reason === "unbuildable") {
+    backHome(formData, date, [
+      ["notice", "unbuildable"],
+      ...unapplied.unmet.map((c): [string, string] => ["unmet", conditionLabel(c)]),
+      ...unapplied.missingSlots.map((slot): [string, string] => ["missingSlot", slot]),
+    ]);
+  }
+  backHome(formData, date);
+}
+
+// 되돌리기 to an earlier step of the 추천 세션.
+export async function undoRevision(formData: FormData) {
+  const userId = await requireUserId();
+  const date = dateFrom(formData);
+  const sessionId = sessionFrom(formData);
+  const step = Number(formData.get("step"));
+  await getOutfitRecommender().undo({ userId, sessionId, step });
+  backHome(formData, date);
 }
 
 // 입을게요

@@ -257,6 +257,7 @@ describe("수정 결과", () => {
           cause: { type: "exclude", clothing: trousers },
         },
       ],
+      warnings: [],
     });
   });
 

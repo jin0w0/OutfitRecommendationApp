@@ -7,17 +7,9 @@ import type {
   Revision,
   RevisionCondition,
 } from "@/lib/outfit/recommender";
-import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit } from "./actions";
+import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit, undoRevision } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
-import type { Slot } from "@/lib/outfit/wardrobe";
-
-const SLOT_NAMES: Record<Slot, string> = {
-  top: "상의",
-  bottom: "하의",
-  dress: "원피스",
-  outer: "아우터",
-  shoes: "신발",
-};
+import { SLOT_NAMES, conditionLabel, type RevisionNotice } from "./revision-labels";
 
 const SLOT_ORDER: (keyof Outfit)[] = ["outer", "top", "bottom", "dress", "shoes"];
 
@@ -63,7 +55,7 @@ export function RecommendationView({
   regionName,
   situation,
   shown,
-  revisionFailed,
+  notice,
 }: {
   recommendation: Recommendation;
   // The 기본 지역, for weather not taken at an 일정's 장소.
@@ -71,8 +63,8 @@ export function RecommendationView({
   situation: EventKind | null;
   // 코디 already shown for this date, as clothing ids.
   shown: string[][];
-  // The last 대화 message could not be read, so nothing changed.
-  revisionFailed: boolean;
+  // Why the last 대화 message changed nothing, if it did not.
+  notice: RevisionNotice | null;
 }) {
   const { basis, date, accepted, revision } = recommendation;
   const hidden = (
@@ -168,13 +160,48 @@ export function RecommendationView({
           부족해서 {basis ? "이 일정에 맞는 " : ""}코디를 만들 수 없어요.
         </p>
       )}
-      <RevisionForm hidden={inSession} failed={revisionFailed} />
+      <RevisionForm hidden={inSession} notice={notice} />
+      {recommendation.step > 0 && <UndoButtons step={recommendation.step} hidden={inSession} />}
     </section>
   );
 }
 
+// 되돌리기: one step back, or back to the first 추천.
+function UndoButtons({ step, hidden }: { step: number; hidden: ReactNode }) {
+  const targets = step > 1 ? [step - 1, 0] : [0];
+  return (
+    <div className="flex flex-wrap gap-3">
+      {targets.map((target) => (
+        <form key={target} action={undoRevision}>
+          {hidden}
+          <input type="hidden" name="step" value={target} />
+          <button type="submit" className="h-9 rounded-full border border-zinc-300 px-4 text-sm dark:border-zinc-700">
+            {target === 0 ? "처음 추천으로 되돌리기" : "한 단계 되돌리기"}
+          </button>
+        </form>
+      ))}
+    </div>
+  );
+}
+
+// What to say when the last 대화 message changed nothing.
+function noticeText(notice: RevisionNotice) {
+  switch (notice.type) {
+    case "revision-failed":
+      return "요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.";
+    case "off-topic":
+      return "코디와 관련된 요청만 도와드릴 수 있어요. 예: 좀 더 캐주얼하게, 이 바지 말고 다른 걸로";
+    case "unbuildable": {
+      const slots = notice.missingSlots.length
+        ? ` (${notice.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가) 부족해요)`
+        : "";
+      return `옷장의 옷으로는 "${notice.unmet.join(", ")}" 조건을 만족하는 코디를 만들 수 없어요${slots}. 코디는 그대로 두었어요.`;
+    }
+  }
+}
+
 // 대화로 수정하기: a message about the 코디 above.
-function RevisionForm({ hidden, failed }: { hidden: ReactNode; failed: boolean }) {
+function RevisionForm({ hidden, notice }: { hidden: ReactNode; notice: RevisionNotice | null }) {
   return (
     <form action={reviseOutfit} className="flex flex-col gap-2">
       {hidden}
@@ -194,9 +221,9 @@ function RevisionForm({ hidden, failed }: { hidden: ReactNode; failed: boolean }
           보내기
         </button>
       </div>
-      {failed && (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.
+      {notice && (
+        <p role="status" className="text-sm text-zinc-600 dark:text-zinc-400">
+          {noticeText(notice)}
         </p>
       )}
     </form>
@@ -204,7 +231,7 @@ function RevisionForm({ hidden, failed }: { hidden: ReactNode; failed: boolean }
 }
 
 // What the last message asked for, every 수정 조건 kept so far, and what changed.
-function RevisionSummary({ revision: { message, conditions, changes } }: { revision: Revision }) {
+function RevisionSummary({ revision: { message, conditions, changes, warnings } }: { revision: Revision }) {
   return (
     <section
       aria-label="수정 결과"
@@ -240,25 +267,23 @@ function RevisionSummary({ revision: { message, conditions, changes } }: { revis
       ) : (
         <p className="text-zinc-500">바뀐 옷은 없어요.</p>
       )}
+      {/* Steps stored before 격식 충돌 경고 existed have no warnings. */}
+      {(warnings ?? []).map(({ basis, conditions: clashing }) => (
+        <p
+          key={clashing.map(conditionKey).join()}
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {EVENT_KINDS[basis.kind].name}({FORMALITY_NAMES[basis.formality]}) 일정과 격식이 맞지 않을 수 있어요:{" "}
+          {clashing.map(conditionLabel).join(", ")}
+        </p>
+      ))}
     </section>
   );
 }
 
 function conditionKey(condition: RevisionCondition) {
   return "clothing" in condition ? `${condition.type}:${condition.clothing.id}` : condition.type;
-}
-
-function conditionLabel(condition: RevisionCondition) {
-  switch (condition.type) {
-    case "style":
-      return condition.direction === "casual" ? "더 캐주얼하게" : "더 포멀하게";
-    case "color":
-      return condition.direction === "lighter" ? "더 밝은 색으로" : "더 어두운 색으로";
-    case "exclude":
-      return `${condition.clothing.name} 빼기`;
-    case "keep":
-      return `${condition.clothing.name} 꼭 입기`;
-  }
 }
 
 const FACTOR_NAMES: Record<Factor, string> = {
