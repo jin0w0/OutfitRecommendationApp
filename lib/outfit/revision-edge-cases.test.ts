@@ -161,6 +161,21 @@ describe("무관한 메시지", () => {
   });
 });
 
+describe("옷장에 없는 옷을 가리킨 메시지", () => {
+  test("leaves the outfit as it was and says the piece could not be identified", async () => {
+    const { recommender, llm, minji, first } = await minjiFor("work");
+    llm.interpret("그 빨간 코트 말고", [{ type: "exclude", clothingId: "no-such-clothing" }]);
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "그 빨간 코트 말고" });
+
+    expect(revised).toMatchObject({
+      outfit: first.outfit,
+      revision: null,
+      unapplied: { reason: "unknown-clothing", message: "그 빨간 코트 말고" },
+    });
+  });
+});
+
 describe("되돌리기", () => {
   test("back to the first 추천 brings back its outfit and no 수정 조건", async () => {
     const { recommender, minji, first } = await minjiFor("work");

@@ -75,6 +75,7 @@ function revisionNotice(params: Record<string, string | string[] | undefined>): 
   switch (params.notice) {
     case "revision-failed":
     case "off-topic":
+    case "unknown-clothing":
       return { type: params.notice };
     case "style-limit":
       return params.direction === "casual" || params.direction === "formal"

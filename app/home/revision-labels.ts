@@ -30,10 +30,12 @@ export function conditionLabel(condition: RevisionCondition) {
 // What the home screen says about the last 대화 message when it changed nothing.
 //   revision-failed: the LLM could not read it
 //   off-topic: 무관한 메시지, so the user is asked to talk about the 코디
+//   unknown-clothing: it named a piece not found in the 옷장
 //   unbuildable: 구성 불가, with the 수정 조건 (as labels) that could not be met
 //   style-limit: the 코디 cannot go further in the 스타일 방향 asked for
 export type RevisionNotice =
   | { type: "revision-failed" }
   | { type: "off-topic" }
+  | { type: "unknown-clothing" }
   | { type: "style-limit"; direction: StyleDirection }
   | { type: "unbuildable"; unmet: string[]; missingSlots: Slot[] };

@@ -309,12 +309,15 @@ export type Recommendation = Step & {
 //     with the other 수정 조건 kept so far; `missingSlots` are the slots left
 //     without clothes.
 //   off-topic: 무관한 메시지. It asked nothing of the 코디.
+//   unknown-clothing: it named a piece that could not be told among the
+//     옷장's clothes.
 //   style-limit: it asked for a 스타일 방향 the 코디 cannot go further in: past
 //     the end of the 격식 수준, or again after the 코디 already went one level
 //     from its 일정's.
 export type UnappliedRevision =
   | { reason: "unbuildable"; message: string; unmet: RevisionCondition[]; missingSlots: Slot[] }
   | { reason: "off-topic"; message: string }
+  | { reason: "unknown-clothing"; message: string }
   | { reason: "style-limit"; message: string; direction: StyleDirection };
 
 // How much of the 일정 score a piece loses when it is two 격식 수준 off every
@@ -474,7 +477,7 @@ export function createOutfitRecommender({
       // The latest step, left as it was.
       const unchanged = { ...last, sessionId, step: session.steps.length - 1 };
       const wardrobeClothes = await wardrobe.clothes(userId);
-      let asked: RevisionCondition[];
+      let asked: ReturnType<typeof resolved>;
       try {
         asked = resolved(
           await llm.interpretRevision({
@@ -487,15 +490,18 @@ export function createOutfitRecommender({
       } catch {
         return { ...unchanged, missing: [...last.missing, "revision-llm-failed"], unapplied: null };
       }
-      // Nothing asked of the 코디 (or only of pieces the 옷장 does not have):
-      // the user is asked to talk about the 코디 instead.
-      if (!asked.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
+      // A piece the user meant could not be told: nothing is changed rather
+      // than the rest of the message applied without it.
+      if (asked.unknownClothing) return { ...unchanged, unapplied: { reason: "unknown-clothing", message } };
+      // Nothing asked of the 코디: the user is asked to talk about the 코디
+      // instead.
+      if (!asked.conditions.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
       const earlier = last.revision?.conditions ?? [];
-      const conditions = accumulate(earlier, asked);
+      const conditions = accumulate(earlier, asked.conditions);
       const day = dayOf(first);
       const anchor = anchorFormality(first);
       // A 스타일 방향 that leaves the 격식 수준 where it is would change nothing.
-      const style = asked.find((c) => c.type === "style");
+      const style = asked.conditions.find((c) => c.type === "style");
       if (style && shifted(anchor, conditions) === shifted(anchor, earlier)) {
         return { ...unchanged, unapplied: { reason: "style-limit", message, direction: style.direction } };
       }
@@ -793,16 +799,19 @@ function conditioned(clothes: Clothing[], formality: Formality | null, condition
   return [...kept, ...pool];
 }
 
-// The 수정 조건 the LLM answered, with the pieces they name from the 옷장.
-// Conditions naming a piece the 옷장 does not have are dropped, as is
-// off-topic, which asks nothing of the 코디.
-function resolved(asked: AskedCondition[], wardrobe: Clothing[]): RevisionCondition[] {
-  return asked.flatMap((c): RevisionCondition[] => {
+// The 수정 조건 the LLM answered, with the pieces they name from the 옷장,
+// and whether any named a piece the 옷장 does not have (dropped). Off-topic
+// asks nothing of the 코디, so it is dropped too.
+function resolved(asked: AskedCondition[], wardrobe: Clothing[]) {
+  let unknownClothing = false;
+  const conditions = asked.flatMap((c): RevisionCondition[] => {
     if (c.type === "off-topic") return [];
     if (c.type === "style" || c.type === "color") return [c];
     const clothing = wardrobe.find(({ id }) => id === c.clothingId);
+    if (!clothing) unknownClothing = true;
     return clothing ? [{ type: c.type, clothing }] : [];
   });
+  return { conditions, unknownClothing };
 }
 
 // The 수정 조건 so far with `asked` added after them. A new condition replaces

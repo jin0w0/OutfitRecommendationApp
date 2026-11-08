@@ -191,6 +191,8 @@ function noticeText(notice: RevisionNotice) {
       return "요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.";
     case "off-topic":
       return "코디와 관련된 요청만 도와드릴 수 있어요. 예: 좀 더 캐주얼하게, 이 바지 말고 다른 걸로";
+    case "unknown-clothing":
+      return "말씀하신 옷을 옷장에서 찾지 못해 코디를 그대로 두었어요. 옷 이름으로 다시 말씀해 주세요.";
     case "style-limit":
       return `이 일정에서는 지금보다 더 ${notice.direction === "casual" ? "캐주얼하게" : "포멀하게"} 바꿀 수 없어요. 코디는 그대로 두었어요.`;
     case "unbuildable": {

@@ -49,6 +49,7 @@ export async function reviseOutfit(formData: FormData) {
   const { unapplied } = revised;
   if (revised.missing.includes("revision-llm-failed")) backHome(formData, date, [["notice", "revision-failed"]]);
   if (unapplied?.reason === "off-topic") backHome(formData, date, [["notice", "off-topic"]]);
+  if (unapplied?.reason === "unknown-clothing") backHome(formData, date, [["notice", "unknown-clothing"]]);
   if (unapplied?.reason === "style-limit") {
     backHome(formData, date, [
       ["notice", "style-limit"],
