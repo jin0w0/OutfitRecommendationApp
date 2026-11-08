@@ -1,5 +1,12 @@
 import { createTestAccount } from "@/lib/account/testing/harness";
-import { createOutfitRecommender, type Weather, type WeatherSource } from "../recommender";
+import {
+  createOutfitRecommender,
+  type CalendarEvent,
+  type CalendarSource,
+  type CalendarStatus,
+  type Weather,
+  type WeatherSource,
+} from "../recommender";
 import { createWardrobe, type NewClothing } from "../wardrobe";
 import { createWearRecords } from "../wear-records";
 
@@ -14,7 +21,14 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   const wearRecords = createWearRecords({ dialect });
   await wearRecords.migrate();
   const weather = new FakeWeather();
-  const recommender = createOutfitRecommender({ wardrobe, weather, wearRecords, today: () => today });
+  const calendar = new FakeCalendar();
+  const recommender = createOutfitRecommender({
+    wardrobe,
+    weather,
+    calendar,
+    wearRecords,
+    today: () => today,
+  });
 
   const signedIn = new Map<string, Headers>();
 
@@ -50,7 +64,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     return added;
   }
 
-  return { wardrobe, weather, recommender, createUser, deleteAccount, addClothes };
+  return { wardrobe, weather, calendar, recommender, createUser, deleteAccount, addClothes };
 }
 
 // Seoul, where the tests' users live.
@@ -74,5 +88,67 @@ class FakeWeather implements WeatherSource {
     this.requests.push(request);
     if (this.failure) throw this.failure;
     return this.forecasts.get(request.date) ?? null;
+  }
+}
+
+// Google Calendar for the tests' users. Nobody is connected until `connect`;
+// each event belongs to one calendar and starts on one day.
+class FakeCalendar implements CalendarSource {
+  private connections = new Map<string, CalendarStatus>();
+  private events: (CalendarEvent & { userId: string })[] = [];
+  private failure: Error | null = null;
+  private revoked = new Set<string>();
+  private nextId = 1;
+  eventRequests: { userId: string; calendarId: string; date: string }[] = [];
+
+  // Connects the user with these calendars chosen.
+  connect(userId: string, selectedCalendarIds: string[]) {
+    this.connections.set(userId, { status: "connected", calendarIds: selectedCalendarIds });
+  }
+
+  // Google stopped accepting the user's connection (expired or revoked).
+  expire(userId: string) {
+    this.connections.set(userId, { status: "reconnect-needed" });
+  }
+
+  // Google refuses the token although the 연동 still looks connected, as when
+  // the user revoked access from their Google account.
+  revokeAtGoogle(userId: string) {
+    this.revoked.add(userId);
+  }
+
+  failWith(error = new Error("Google Calendar is down")) {
+    this.failure = error;
+  }
+
+  // `start` and `end` are YYYY-MM-DD for an all-day event, else ISO date-times.
+  addEvent(
+    userId: string,
+    event: Pick<CalendarEvent, "calendarId" | "title" | "start" | "end"> & Partial<CalendarEvent>,
+  ) {
+    const added: CalendarEvent = {
+      id: `event-${this.nextId++}`,
+      allDay: !event.start.includes("T"),
+      location: null,
+      description: null,
+      ...event,
+    };
+    this.events.push({ ...added, userId });
+    return added;
+  }
+
+  async status(userId: string): Promise<CalendarStatus> {
+    return this.connections.get(userId) ?? { status: "not-connected" };
+  }
+
+  async eventsOn(request: { userId: string; calendarId: string; date: string }) {
+    this.eventRequests.push(request);
+    if (this.failure) throw this.failure;
+    if (this.revoked.has(request.userId)) return null;
+    if (this.connections.get(request.userId)?.status !== "connected") return null;
+    return this.events
+      .filter((e) => e.userId === request.userId && e.calendarId === request.calendarId)
+      .filter((e) => e.start.slice(0, 10) === request.date)
+      .map(({ userId, ...event }) => (void userId, event));
   }
 }

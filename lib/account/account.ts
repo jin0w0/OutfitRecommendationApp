@@ -192,6 +192,7 @@ export function createAccount(config: AccountConfig) {
     // For server-side callers (the calendar adapter) that already know the user.
     getCalendarAccessToken: (userId: string) => calendar.accessToken(userId),
     getSelectedCalendarIds: (userId: string) => calendar.selectedCalendarIds(userId),
+    markCalendarReconnectNeeded: (userId: string) => calendar.markReconnectNeeded(userId),
 
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });

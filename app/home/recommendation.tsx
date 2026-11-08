@@ -1,4 +1,4 @@
-import type { Outfit, Recommendation } from "@/lib/outfit/recommender";
+import type { CalendarEvent, Outfit, Recommendation } from "@/lib/outfit/recommender";
 import { acceptOutfit, cancelAcceptance } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
@@ -57,7 +57,7 @@ export function RecommendationView({
   shown,
 }: {
   recommendation: Recommendation;
-  // The 기본 지역 the weather is for.
+  // The 기본 지역, for weather not taken at an 일정's 장소.
   regionName: string;
   situation: EventKind | null;
   // 코디 already shown for this date, as clothing ids.
@@ -94,6 +94,7 @@ export function RecommendationView({
           </span>
         )}
       </h2>
+      <EventList recommendation={recommendation} />
       <WeatherLine recommendation={recommendation} regionName={regionName} />
       {recommendation.status === "ok" ? (
         <>
@@ -151,9 +152,61 @@ export function RecommendationView({
   );
 }
 
+// The day's 일정 from the calendar, with the 기준 일정 marked, or why they
+// could not be read. Nothing for a user without 캘린더 연동 and no 일정.
+function EventList({
+  recommendation: { events, baseEvent, missing },
+}: {
+  recommendation: Recommendation;
+}) {
+  if (missing.includes("calendar-failed")) {
+    return (
+      <p className="rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+        캘린더 일정을 불러오지 못해 일정 없이 추천했어요.
+      </p>
+    );
+  }
+  if (!events.length) return null;
+  return (
+    <ul aria-label="이날의 일정" className="flex flex-col gap-2">
+      {events.map((event) => (
+        <li
+          key={`${event.calendarId}/${event.id}`}
+          className="flex flex-col rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800"
+        >
+          <span className="flex items-center gap-2 font-medium">
+            {event.title}
+            {event === baseEvent && (
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                기준 일정
+              </span>
+            )}
+          </span>
+          <span className="text-zinc-600 dark:text-zinc-400">
+            {eventTime(event)}
+            {event.location && ` · ${event.location}`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function eventTime(event: CalendarEvent) {
+  if (event.allDay) return "종일";
+  const time = (iso: string) =>
+    new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(iso));
+  return `${time(event.start)}–${time(event.end)}`;
+}
+
 // The weather the 코디 was chosen for, or why it was not 반영.
 function WeatherLine({
-  recommendation: { weather, missing },
+  recommendation: { weather, weatherPlace, missing },
   regionName,
 }: {
   recommendation: Recommendation;
@@ -162,7 +215,7 @@ function WeatherLine({
   if (weather) {
     return (
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        {regionName} 날씨 {weather.temperature}°C · {weather.rain ? "비 소식 있음" : "비 소식 없음"}
+        {weatherPlace ?? regionName} 날씨 {weather.temperature}°C · {weather.rain ? "비 소식 있음" : "비 소식 없음"}
       </p>
     );
   }

@@ -230,6 +230,10 @@ export function createCalendarConnections({
     },
 
     accessToken,
+
+    // For a caller whose Google request was refused with an otherwise valid
+    // token (access revoked from the Google account).
+    markReconnectNeeded,
   };
 
   // Revokes Google access for a connection that is going away and runs the

@@ -46,7 +46,8 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   return (
     <>
       <UserBar user={user} />
-      {user.calendarConnection?.status === "reconnect-needed" && (
+      {(user.calendarConnection?.status === "reconnect-needed" ||
+        recommendation.missing.includes("calendar-reconnect-needed")) && (
         <ReconnectNotice returnTo="/home" />
       )}
       <OutfitRequestForm date={date} situation={situation} />
