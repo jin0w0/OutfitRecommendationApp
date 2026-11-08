@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
-import type { DayEvent, Factor, Outfit, Recommendation } from "@/lib/outfit/recommender";
-import { acceptOutfit, cancelAcceptance, correctEvent } from "./actions";
+import type {
+  DayEvent,
+  Factor,
+  Outfit,
+  Recommendation,
+  Revision,
+  RevisionCondition,
+} from "@/lib/outfit/recommender";
+import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
 
@@ -56,6 +63,7 @@ export function RecommendationView({
   regionName,
   situation,
   shown,
+  revisionFailed,
 }: {
   recommendation: Recommendation;
   // The 기본 지역, for weather not taken at an 일정's 장소.
@@ -63,12 +71,21 @@ export function RecommendationView({
   situation: EventKind | null;
   // 코디 already shown for this date, as clothing ids.
   shown: string[][];
+  // The last 대화 message could not be read, so nothing changed.
+  revisionFailed: boolean;
 }) {
-  const { basis, date, accepted } = recommendation;
+  const { basis, date, accepted, revision } = recommendation;
   const hidden = (
     <>
       <input type="hidden" name="date" value={date} />
       {situation && <input type="hidden" name="situation" value={situation} />}
+    </>
+  );
+  // As `hidden`, and back to this 추천 세션 afterwards.
+  const inSession = (
+    <>
+      {hidden}
+      <input type="hidden" name="session" value={recommendation.sessionId} />
     </>
   );
   return (
@@ -80,7 +97,7 @@ export function RecommendationView({
           </p>
           <p className="text-sm">{accepted.clothes.map((c) => c.name).join(", ")}</p>
           <form action={cancelAcceptance}>
-            {hidden}
+            {inSession}
             <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
               수락 취소
             </button>
@@ -97,6 +114,7 @@ export function RecommendationView({
       </h2>
       <EventList recommendation={recommendation} hidden={hidden} />
       <WeatherLine recommendation={recommendation} regionName={regionName} />
+      {revision && <RevisionSummary revision={revision} />}
       {recommendation.status === "ok" ? (
         <>
           <ul className="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
@@ -115,7 +133,7 @@ export function RecommendationView({
           <Reasons recommendation={recommendation} />
           <div className="flex flex-wrap gap-3">
             <form action={acceptOutfit}>
-              {hidden}
+              {inSession}
               {Object.values(recommendation.outfit).map((clothing) => (
                 <input key={clothing.id} type="hidden" name="clothing" value={clothing.id} />
               ))}
@@ -150,8 +168,97 @@ export function RecommendationView({
           부족해서 {basis ? "이 일정에 맞는 " : ""}코디를 만들 수 없어요.
         </p>
       )}
+      <RevisionForm hidden={inSession} failed={revisionFailed} />
     </section>
   );
+}
+
+// 대화로 수정하기: a message about the 코디 above.
+function RevisionForm({ hidden, failed }: { hidden: ReactNode; failed: boolean }) {
+  return (
+    <form action={reviseOutfit} className="flex flex-col gap-2">
+      {hidden}
+      <label htmlFor="revision-message" className="text-sm font-medium">
+        대화로 수정하기
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="revision-message"
+          name="message"
+          required
+          maxLength={200}
+          placeholder="예: 좀 더 캐주얼하게, 이 바지 말고 다른 걸로"
+          className="h-10 flex-1 rounded-md border border-zinc-300 bg-transparent px-3 dark:border-zinc-700"
+        />
+        <button type="submit" className="h-10 rounded-full bg-foreground px-5 text-background">
+          보내기
+        </button>
+      </div>
+      {failed && (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.
+        </p>
+      )}
+    </form>
+  );
+}
+
+// What the last message asked for, every 수정 조건 kept so far, and what changed.
+function RevisionSummary({ revision: { message, conditions, changes } }: { revision: Revision }) {
+  return (
+    <section
+      aria-label="수정 결과"
+      className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800"
+    >
+      <p>
+        <span className="text-zinc-500">요청</span> “{message}”
+      </p>
+      {conditions.length > 0 && (
+        <ul aria-label="수정 조건" className="flex flex-wrap gap-2">
+          {conditions.map((condition) => (
+            <li
+              key={conditionKey(condition)}
+              className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+            >
+              {conditionLabel(condition)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {changes.length ? (
+        <ul aria-label="바뀐 점" className="flex flex-col gap-1">
+          {changes.map(({ slot, from, to, cause }) => (
+            <li key={slot}>
+              {SLOT_NAMES[slot]}: {from?.name ?? "없음"} → {to?.name ?? "없음"}
+              <span className="text-zinc-500">
+                {" "}
+                ({cause ? `${conditionLabel(cause)} 요청에 따라` : "나머지 옷과 어울리도록"})
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-zinc-500">바뀐 옷은 없어요.</p>
+      )}
+    </section>
+  );
+}
+
+function conditionKey(condition: RevisionCondition) {
+  return "clothing" in condition ? `${condition.type}:${condition.clothing.id}` : condition.type;
+}
+
+function conditionLabel(condition: RevisionCondition) {
+  switch (condition.type) {
+    case "style":
+      return condition.direction === "casual" ? "더 캐주얼하게" : "더 포멀하게";
+    case "color":
+      return condition.direction === "lighter" ? "더 밝은 색으로" : "더 어두운 색으로";
+    case "exclude":
+      return `${condition.clothing.name} 빼기`;
+    case "keep":
+      return `${condition.clothing.name} 꼭 입기`;
+  }
 }
 
 const FACTOR_NAMES: Record<Factor, string> = {
@@ -223,7 +330,7 @@ function EventList({
           >
             <span className="flex items-center gap-2 font-medium">
               {event.title}
-              {event === baseEvent && (
+              {baseEvent?.calendarId === event.calendarId && baseEvent.id === event.id && (
                 <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                   기준 일정
                 </span>
