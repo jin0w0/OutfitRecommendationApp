@@ -35,13 +35,20 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   const { name: regionName, latitude, longitude } = user.homeRegion!;
   // 코디 already shown for this date (다시 추천받기), each as dot-joined clothing ids.
   const shown = [params.shown ?? []].flat().map((outfit) => outfit.split("."));
-  const recommendation = await getOutfitRecommender().recommendForDate({
-    userId: user.id,
-    date,
-    situation,
-    location: { latitude, longitude },
-    shown,
-  });
+  const recommender = getOutfitRecommender();
+  // The 추천 세션 being revised, if it is still there, else a fresh 추천.
+  const sessionId = typeof params.session === "string" ? params.session : null;
+  const continued = sessionId && (await recommender.latest({ userId: user.id, sessionId }));
+  const recommendation =
+    continued && continued.date === date
+      ? continued
+      : await recommender.recommendForDate({
+          userId: user.id,
+          date,
+          situation,
+          location: { latitude, longitude },
+          shown,
+        });
 
   return (
     <>
@@ -56,6 +63,7 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         regionName={regionName}
         situation={situation}
         shown={shown}
+        revisionFailed={params.revisionFailed === "1"}
       />
     </>
   );

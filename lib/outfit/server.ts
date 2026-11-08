@@ -14,10 +14,11 @@ import {
 } from "./recommender";
 import { createWardrobe } from "./wardrobe";
 import { createWearRecords } from "./wear-records";
+import { createRecommendationSessions } from "./recommendation-sessions";
 
 let instance: OutfitRecommender | undefined;
 
-// The app's single 코디 추천 module, over the 옷장, 착용 기록 and 일정 판단 수정값 in Neon, the
+// The app's single 코디 추천 module, over the 옷장, 착용 기록, 일정 판단 수정값 and 추천 세션 in Neon, the
 // 기상청 단기예보, the user's Google Calendar and OpenAI. Built on first use so that
 // `next build` does not need the secrets.
 export function getOutfitRecommender(): OutfitRecommender {
@@ -32,6 +33,7 @@ export function getOutfitRecommender(): OutfitRecommender {
       llm: languageModel(),
       wearRecords: createWearRecords({ dialect }),
       eventCorrections: createEventCorrections({ dialect }),
+      sessions: createRecommendationSessions({ dialect }),
     });
   }
   return instance;
@@ -50,12 +52,13 @@ function weatherSource(): WeatherSource {
 }
 
 // Without a key every LLM call fails, so recommendations go on without the
-// 일정 judged and with template 추천 이유, and say so.
+// 일정 judged and with template 추천 이유, 대화로 수정하기 leaves the 코디 as
+// it was, and each says so.
 function languageModel(): LanguageModel {
   const apiKey = process.env.OPENAI_API_KEY;
   if (apiKey) return createOpenAiLanguageModel({ apiKey, model: process.env.OPENAI_MODEL || undefined });
   const missingKey = async (): Promise<never> => {
     throw new Error("Missing environment variable OPENAI_API_KEY");
   };
-  return { judgeEvents: missingKey, writeReasons: missingKey };
+  return { judgeEvents: missingKey, writeReasons: missingKey, interpretRevision: missingKey };
 }

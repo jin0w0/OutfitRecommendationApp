@@ -2,7 +2,14 @@
 // answer is JSON in a fixed schema. Not tested automatically; check it by hand
 // with OPENAI_API_KEY set.
 import OpenAI from "openai";
-import type { EventJudgement, EventText, Evidence, LanguageModel } from "./recommender";
+import type {
+  EventJudgement,
+  EventText,
+  Evidence,
+  LanguageModel,
+  AskedCondition,
+  RevisionRequest,
+} from "./recommender";
 import { EVENT_KINDS, isEventKind } from "./situations";
 import type { Formality } from "./wardrobe";
 
@@ -24,6 +31,16 @@ const REASON_INSTRUCTIONS = `너는 옷차림 추천 서비스에서 추천한 �
   .join(", ")}. 격식 수준 이름: casual=캐주얼, semi-formal=세미 포멀, formal=포멀.
 근거마다 한국어로 짧은 한 문장을 쓴다. 옷은 이름으로 부른다. 근거에 없는 사실은 절대 더하지 않는다.
 입력의 근거 순서 그대로, 근거마다 하나씩 답한다.`;
+
+const REVISION_INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자가 추천받은 코디를 고쳐 달라고 한 말을 수정 조건으로 바꾼다.
+입력의 message는 사용자의 말, outfit은 사용자가 보고 있는 코디의 옷, wardrobe는 사용자의 옷장 전체다. 옷마다 id, 이름(name), 종류(slot: top 상의, bottom 하의, dress 원피스, outer 아우터, shoes 신발), 색(color), 격식 수준(formality)이 있다.
+수정 조건의 종류(type)는 다음과 같다.
+- style: 더 캐주얼하게(direction=casual) 또는 더 포멀하게(direction=formal).
+- color: 더 밝은 색으로(direction=lighter) 또는 더 어두운 색으로(direction=darker).
+- exclude: 이 옷은 빼 달라. clothingId에 그 옷의 id를 쓴다. "이 바지 말고", "바지만 바꿔줘"는 outfit의 그 바지를 뺀다.
+- keep: 이 옷은 꼭 입겠다. clothingId에 그 옷의 id를 쓴다.
+옷을 가리키는 말은 먼저 outfit에서, 없으면 wardrobe에서 찾는다. 어떤 옷인지 알 수 없으면 그 조건은 쓰지 않는다. 쓰지 않는 필드(direction 또는 clothingId)는 null로 둔다.
+사용자가 말한 순서대로 조건을 답한다. 코디 수정과 관계없는 말이면 빈 목록으로 답한다. 코디를 직접 고르지 않는다.`;
 
 export function createOpenAiLanguageModel({
   apiKey,
@@ -71,6 +88,47 @@ export function createOpenAiLanguageModel({
           throw new Error("The LLM answered outside the schema");
         }
         return { kind, formality: formality as Formality };
+      });
+    },
+
+    async interpretRevision({ message, outfit, wardrobe }: RevisionRequest): Promise<AskedCondition[]> {
+      const piece = ({ id, name, slot, color, formality }: RevisionRequest["wardrobe"][number]) => ({
+        id,
+        name,
+        slot,
+        color,
+        formality,
+      });
+      const answer = (await structured(
+        "revision_conditions",
+        REVISION_INSTRUCTIONS,
+        { message, outfit: outfit.map(piece), wardrobe: wardrobe.map(piece) },
+        {
+          type: "object",
+          properties: {
+            conditions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: { type: "string", enum: ["style", "color", "exclude", "keep"] },
+                  direction: { type: ["string", "null"], enum: ["casual", "formal", "lighter", "darker", null] },
+                  clothingId: { type: ["string", "null"] },
+                },
+                required: ["type", "direction", "clothingId"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["conditions"],
+          additionalProperties: false,
+        },
+      )) as { conditions: { type: unknown; direction: unknown; clothingId: unknown }[] };
+      return answer.conditions.map(({ type, direction, clothingId }): AskedCondition => {
+        if (type === "style" && (direction === "casual" || direction === "formal")) return { type, direction };
+        if (type === "color" && (direction === "lighter" || direction === "darker")) return { type, direction };
+        if ((type === "exclude" || type === "keep") && typeof clothingId === "string") return { type, clothingId };
+        throw new Error("The LLM answered outside the schema");
       });
     },
 

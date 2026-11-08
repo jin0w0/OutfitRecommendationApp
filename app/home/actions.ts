@@ -18,12 +18,29 @@ function dateFrom(formData: FormData) {
   return date;
 }
 
-// Back to the same date and 일정 on the home screen.
-function backHome(formData: FormData, date: string): never {
+// Back to the same date and 일정 on the home screen, and to the same 추천 세션
+// when the form names one.
+function backHome(formData: FormData, date: string, extra: Record<string, string> = {}): never {
   const params = new URLSearchParams({ date });
   const situation = formData.get("situation");
   if (isEventKind(situation)) params.set("situation", situation);
+  const session = formData.get("session");
+  if (typeof session === "string" && session) params.set("session", session);
+  for (const [name, value] of Object.entries(extra)) params.set(name, value);
   redirect(`/home?${params}`);
+}
+
+// 대화로 수정하기, then back to the 추천 세션 to show the 수정 결과.
+export async function reviseOutfit(formData: FormData) {
+  const userId = await requireUserId();
+  const date = dateFrom(formData);
+  const sessionId = formData.get("session");
+  const message = String(formData.get("message") ?? "").trim();
+  if (typeof sessionId !== "string" || !sessionId) throw new Error("Invalid 추천 세션");
+  if (!message) backHome(formData, date);
+  const revised = await getOutfitRecommender().revise({ userId, sessionId, message });
+  // The session keeps no step for a message the LLM could not read, so say so here.
+  backHome(formData, date, revised.missing.includes("revision-llm-failed") ? { revisionFailed: "1" } : {});
 }
 
 // 입을게요

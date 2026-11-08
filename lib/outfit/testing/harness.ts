@@ -8,12 +8,15 @@ import {
   type EventText,
   type Evidence,
   type LanguageModel,
+  type AskedCondition,
+  type RevisionRequest,
   type Weather,
   type WeatherSource,
 } from "../recommender";
 import { createWardrobe, type NewClothing } from "../wardrobe";
 import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
+import { createRecommendationSessions } from "../recommendation-sessions";
 
 // A recommender over a real 옷장, 착용 기록 and 일정 판단 수정값 in an in-process Postgres, next
 // to the account tables so clothes belong to real users. `today` is the date
@@ -27,6 +30,8 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   await wearRecords.migrate();
   const eventCorrections = createEventCorrections({ dialect });
   await eventCorrections.migrate();
+  const sessions = createRecommendationSessions({ dialect });
+  await sessions.migrate();
   const weather = new FakeWeather();
   const calendar = new FakeCalendar();
   const llm = new FakeLanguageModel();
@@ -37,6 +42,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     llm,
     wearRecords,
     eventCorrections,
+    sessions,
     today: () => today,
   });
 
@@ -171,15 +177,27 @@ export const FAKE_SENTENCE = "LLM이 쓴 문장:";
 // call.
 class FakeLanguageModel implements LanguageModel {
   private judgements = new Map<string, EventJudgement>();
+  private revisions = new Map<string, (request: RevisionRequest) => AskedCondition[]>();
   private failure: Error | null = null;
   // What each judgeEvents call was given.
   judgeRequests: EventText[][] = [];
   // What each writeReasons call was given.
   reasonRequests: Evidence[][] = [];
+  // What each interpretRevision call was given.
+  revisionRequests: RevisionRequest[] = [];
 
   // 일정 titled `title` are judged as `judgement`.
   judge(title: string, judgement: EventJudgement) {
     this.judgements.set(title, judgement);
+  }
+
+  // The 대화 message `message` asks for `conditions`, or for what `conditions`
+  // makes of the 코디 and 옷장 the user is looking at.
+  interpret(
+    message: string,
+    conditions: AskedCondition[] | ((request: RevisionRequest) => AskedCondition[]),
+  ) {
+    this.revisions.set(message, typeof conditions === "function" ? conditions : () => conditions);
   }
 
   failWith(error = new Error("the LLM is down")) {
@@ -192,6 +210,14 @@ class FakeLanguageModel implements LanguageModel {
     this.reasonRequests.push(evidence);
     if (this.failure) throw this.failure;
     return evidence.map(({ factor }) => `${FAKE_SENTENCE} ${factor}`);
+  }
+
+  async interpretRevision(request: RevisionRequest) {
+    this.revisionRequests.push(request);
+    if (this.failure) throw this.failure;
+    const conditions = this.revisions.get(request.message);
+    if (!conditions) throw new Error(`No 수정 조건 prepared for ${request.message}`);
+    return conditions(request);
   }
 
   async judgeEvents(events: EventText[]) {

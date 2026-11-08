@@ -6,6 +6,7 @@ import { templateSentence } from "./reasons";
 import type { Clothing, Formality, Material, Preferences, Slot, Style, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
+import type { RecommendationSessions } from "./recommendation-sessions";
 
 export type Outfit = {
   top?: Clothing;
@@ -73,7 +74,48 @@ export type LanguageModel = {
   // One short sentence per 근거, in the same order, saying only what the
   // 근거 holds.
   writeReasons(evidence: Evidence[]): Promise<string[]>;
+  // The 수정 조건 a 대화 message asks for, in the order asked. `outfit` is the
+  // 코디 the user is looking at and `wardrobe` their whole 옷장, so that
+  // conditions can name pieces ("이 바지") by clothing id.
+  interpretRevision(request: RevisionRequest): Promise<AskedCondition[]>;
 };
+
+export type RevisionRequest = { message: string; outfit: Clothing[]; wardrobe: Clothing[] };
+
+// One 수정 조건 asked for in 대화로 수정하기.
+//   style: a 격식 수준 one level below (casual) or above (formal) the one the
+//     코디 was first chosen at
+//   color: lighter or darker colors, where the 옷장 has them
+//   exclude: never this piece
+//   keep: always this piece (아이템 고정)
+export type RevisionCondition =
+  | { type: "style"; direction: StyleDirection }
+  | { type: "color"; direction: ColorDirection }
+  | { type: "exclude"; clothing: Clothing }
+  | { type: "keep"; clothing: Clothing };
+
+// A 수정 조건 as the LLM answers it, naming pieces by clothing id.
+export type AskedCondition =
+  | Extract<RevisionCondition, { type: "style" | "color" }>
+  | { type: "exclude" | "keep"; clothingId: string };
+
+export type StyleDirection = "casual" | "formal";
+export type ColorDirection = "lighter" | "darker";
+
+// One slot of the 코디 that a 수정 changed: what it held before and after
+// (null for none), and the 수정 조건 that made the change, or null when it
+// changed only to go with the rest of the 코디.
+export type OutfitChange = {
+  slot: keyof Outfit;
+  from: Clothing | null;
+  to: Clothing | null;
+  cause: RevisionCondition | null;
+};
+
+// What makes a 추천 결과 a 수정 결과: the message, every 수정 조건 asked for
+// in the session so far (a later one replacing any it conflicts with), and how
+// the 코디 differs from the one before.
+export type Revision = { message: string; conditions: RevisionCondition[]; changes: OutfitChange[] };
 
 // One of the day's 일정 with what was judged of it, or null when it could not
 // be judged.
@@ -89,13 +131,16 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 //     the situation the user picked, or none
 //   reasons-llm-failed: the LLM could not write the 추천 이유, so they are
 //     plain sentences made from the 근거
+//   revision-llm-failed: the LLM could not read the 대화 message, so the
+//     코디 is the one before it, unchanged
 export type MissingInfo =
   | "no-forecast"
   | "weather-failed"
   | "calendar-reconnect-needed"
   | "calendar-failed"
   | "llm-failed"
-  | "reasons-llm-failed";
+  | "reasons-llm-failed"
+  | "revision-llm-failed";
 
 // The 일정 the 코디 is chosen for: its 일정의 종류 and 격식 수준.
 export type Basis = EventJudgement;
@@ -121,7 +166,8 @@ export type Factor = keyof Scores;
 export type Evidence =
   // The day's weather, and the pieces that suit it (any 아우터 among them).
   | { factor: "weather"; clothes: Clothing[]; facts: Weather }
-  // The 기준 일정 (or picked situation, untitled), and the pieces at its 격식 수준.
+  // The 기준 일정 (or picked situation, untitled), and the pieces at the 격식 수준 the
+  // 코디 was chosen at: the 일정's, or the one 대화로 수정하기 asked for.
   | { factor: "event"; clothes: Clothing[]; facts: Basis & { title: string | null } }
   // Every color of the 코디, and those of them that are not neutral.
   | { factor: "color"; clothes: Clothing[]; facts: { colors: string[]; accents: string[] } }
@@ -180,17 +226,55 @@ type RecommendationContext = {
   accepted: Accepted;
 };
 
+// What the day is, as 날짜로 추천받기 found it. Every 수정 in the session is
+// for the same day.
+type Day = Omit<RecommendationContext, "accepted">;
+
+// A 추천 세션 step as stored: the 추천 결과, which is a 수정 결과 unless
+// `revision` is null (날짜로 추천받기's).
+type Step = Chosen & { revision: Revision | null };
+
+// The day of a session's first step, as stored. The 기준 일정 is the one among
+// the day's 일정 again, as 날짜로 추천받기 returned it.
+function dayOf(first: Step): Day {
+  const { date, events, baseEvent, basis, weather, weatherPlace } = first;
+  return {
+    date,
+    events,
+    baseEvent: baseEvent && (events.find((e) => e.calendarId === baseEvent.calendarId && e.id === baseEvent.id) ?? null),
+    basis,
+    weather,
+    weatherPlace,
+    missing: first.missing.filter((m) => DAY_MISSING.includes(m)),
+  };
+}
+
+// The MissingInfo that is about the day rather than one 코디.
+const DAY_MISSING: MissingInfo[] = [
+  "no-forecast",
+  "weather-failed",
+  "calendar-reconnect-needed",
+  "calendar-failed",
+  "llm-failed",
+];
+
 // The 코디 the user already accepted ("입을게요") for the date, if any.
 // Clothes since removed from the 옷장 are left out.
 export type Accepted = { status: WearStatus; clothes: Clothing[] } | null;
 
-export type Recommendation = RecommendationContext &
+// The 코디 chosen for the day, or why there is none.
+type Chosen = RecommendationContext &
   (
     // `reasons`: the 추천 이유, from the factors that added most to the score.
     | { status: "ok"; outfit: Outfit; scores: Scores; reasons: Reason[] }
     // The 옷장 has nothing to fill these slots with.
     | { status: "unbuildable"; missingSlots: Slot[] }
   );
+
+export type Recommendation = Step & {
+  // The 추천 세션 this result is a step of, for 대화로 수정하기.
+  sessionId: string;
+};
 
 // How much of the 일정 score a piece loses when it is two 격식 수준 off every
 // other 일정 of the day. Less than a level's worth, so the 기준 일정 comes first.
@@ -208,6 +292,7 @@ export function createOutfitRecommender({
   llm,
   wearRecords,
   eventCorrections,
+  sessions,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "preferences">;
@@ -216,6 +301,7 @@ export function createOutfitRecommender({
   llm: LanguageModel;
   wearRecords: WearRecords;
   eventCorrections: EventCorrections;
+  sessions: RecommendationSessions;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
 }) {
@@ -297,9 +383,9 @@ export function createOutfitRecommender({
       shown?: string[][];
     }): Promise<Recommendation> {
       const missing: MissingInfo[] = [];
-      const day = await dayEvents(userId, date);
-      if (day.failure) missing.push(day.failure);
-      const { events, failed } = await judged(userId, day.events);
+      const calendarDay = await dayEvents(userId, date);
+      if (calendarDay.failure) missing.push(calendarDay.failure);
+      const { events, failed } = await judged(userId, calendarDay.events);
       if (failed) missing.push("llm-failed");
       const baseEvent = mostFormal(events) ?? events[0] ?? null;
       const basis =
@@ -316,47 +402,66 @@ export function createOutfitRecommender({
       } catch {
         missing.push("weather-failed");
       }
-      const weatherPlace = place?.name ?? null;
-      const wardrobeClothes = await wardrobe.clothes(userId);
-      const record = await wearRecords.onDate(userId, date);
-      const accepted: Accepted = record
-        ? {
-            status: record.status,
-            clothes: record.clothingIds.flatMap((id) => wardrobeClothes.filter((c) => c.id === id)),
-          }
-        : null;
-      const context = { date, events, baseEvent, basis, weather, weatherPlace, missing, accepted };
+      const day: Day = { date, events, baseEvent, basis, weather, weatherPlace: place?.name ?? null, missing };
+      const step = await recommend(userId, day, await wardrobe.clothes(userId), {
+        formality: basis?.formality ?? null,
+        conditions: [],
+        shown,
+      });
+      const sessionId = await sessions.start<Step>(userId, date, { ...step, revision: null });
+      return { ...step, sessionId, revision: null };
+    },
 
-      // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
-      const otherFormalities = events.flatMap((event) =>
-        event !== baseEvent && event.judgement ? [event.judgement.formality] : [],
-      );
-      const clothes = suitableClothes(wardrobeClothes, basis);
-      const scoring: ScoringFacts = {
-        basis,
-        basisTitle: baseEvent?.judgement ? baseEvent.title : null,
-        otherFormalities,
-        weather,
-        preferences: await wardrobe.preferences(userId),
-        daysSinceWorn: await daysSinceLastWorn(userId, date),
-      };
-      const needsOuter = weather !== null && weather.temperature < OUTER_BELOW;
-      const candidates = candidateOutfits(clothes, needsOuter);
-      const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
-      const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
-      const best = maxBy(
-        (unshown.length ? unshown : candidates).map((outfit) => ({
-          outfit,
-          scores: score(outfit, scoring),
-        })),
-        ({ scores }) => total(scores),
-      );
-      if (!best) {
-        return { status: "unbuildable", ...context, missingSlots: missingSlots(clothes) };
+    // 대화로 수정하기: the 코디 of the session's latest step, changed as
+    // `message` asks on top of what was asked before. The LLM only turns the
+    // message into 수정 조건; the 코디 is chosen and explained as in
+    // 날짜로 추천받기, for the same day.
+    async revise({
+      userId,
+      sessionId,
+      message,
+    }: {
+      userId: string;
+      sessionId: string;
+      message: string;
+    }): Promise<Recommendation> {
+      const session = await sessions.get<Step>(userId, sessionId);
+      if (!session) throw new Error("No such 추천 세션");
+      const first = session.steps[0];
+      const last = session.steps.at(-1)!;
+      const wardrobeClothes = await wardrobe.clothes(userId);
+      let asked: RevisionCondition[];
+      try {
+        asked = resolved(
+          await llm.interpretRevision({
+            message,
+            outfit: last.status === "ok" ? Object.values(last.outfit) : [],
+            wardrobe: wardrobeClothes,
+          }),
+          wardrobeClothes,
+        );
+      } catch {
+        return { ...last, sessionId, missing: [...last.missing, "revision-llm-failed"] };
       }
-      const { reasons, failed: reasonsFailed } = await explain(best.outfit, best.scores, scoring);
-      if (reasonsFailed) missing.push("reasons-llm-failed");
-      return { status: "ok", ...context, ...best, reasons };
+      const conditions = accumulate(last.revision?.conditions ?? [], asked);
+      const step = await recommend(userId, dayOf(first), wardrobeClothes, {
+        formality: shifted(anchorFormality(first), conditions),
+        conditions,
+        shown: [],
+      });
+      const revision: Revision = { message, conditions, changes: changesBetween(last, step, conditions) };
+      await sessions.saveSteps<Step>(userId, sessionId, [...session.steps, { ...step, revision }]);
+      return { ...step, sessionId, revision };
+    },
+
+    // The 추천 결과 of the session's latest step as it was returned, with the
+    // 코디 accepted for the date now. Null when the session is not the user's
+    // or a later 날짜로 추천받기 replaced it.
+    async latest({ userId, sessionId }: { userId: string; sessionId: string }): Promise<Recommendation | null> {
+      const session = await sessions.get<Step>(userId, sessionId);
+      if (!session) return null;
+      const last = session.steps.at(-1)!;
+      return { ...last, sessionId, accepted: await acceptedOn(userId, last.date, await wardrobe.clothes(userId)) };
     },
 
     // "입을게요": the user will wear these clothes on `date`. Replaces any 코디
@@ -389,6 +494,75 @@ export function createOutfitRecommender({
       await wearRecords.remove(userId, date);
     },
   };
+
+  // The best 코디 for the day from `wardrobeClothes`, chosen at `formality`
+  // under the 수정 조건, and explained. Both entry points choose through this.
+  async function recommend(
+    userId: string,
+    day: Day,
+    wardrobeClothes: Clothing[],
+    {
+      formality,
+      conditions,
+      shown,
+    }: { formality: Formality | null; conditions: RevisionCondition[]; shown: string[][] },
+  ): Promise<Chosen> {
+    const missing = [...day.missing];
+    const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
+    const scoring = await scoringFacts(userId, day, formality);
+    const kept = wardrobeClothes.filter((c) =>
+      conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
+    );
+    const clothes = conditioned(wardrobeClothes, formality, conditions);
+    const needsOuter =
+      (day.weather !== null && day.weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
+    const candidates = candidateOutfits(clothes, needsOuter).filter((outfit) =>
+      kept.every((c) => Object.values(outfit).includes(c)),
+    );
+    const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
+    const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
+    const best = maxBy(
+      (unshown.length ? unshown : candidates).map((outfit) => ({
+        outfit,
+        scores: score(outfit, scoring),
+      })),
+      ({ scores }) => total(scores),
+    );
+    if (!best) {
+      return { status: "unbuildable", ...context, missingSlots: missingSlots(clothes) };
+    }
+    const { reasons, failed } = await explain(best.outfit, best.scores, scoring);
+    if (failed) missing.push("reasons-llm-failed");
+    return { status: "ok", ...context, ...best, reasons };
+  }
+
+  async function acceptedOn(userId: string, date: string, wardrobeClothes: Clothing[]): Promise<Accepted> {
+    const record = await wearRecords.onDate(userId, date);
+    return record
+      ? {
+          status: record.status,
+          clothes: record.clothingIds.flatMap((id) => wardrobeClothes.filter((c) => c.id === id)),
+        }
+      : null;
+  }
+
+  // What every 코디 for the day is scored against, with clothes wanted at
+  // `formality`.
+  async function scoringFacts(userId: string, day: Day, formality: Formality | null): Promise<ScoringFacts> {
+    const { events, baseEvent, basis, weather, date } = day;
+    return {
+      basis,
+      formality,
+      basisTitle: baseEvent?.judgement ? baseEvent.title : null,
+      // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
+      otherFormalities: events.flatMap((event) =>
+        event !== baseEvent && event.judgement ? [event.judgement.formality] : [],
+      ),
+      weather,
+      preferences: await wardrobe.preferences(userId),
+      daysSinceWorn: await daysSinceLastWorn(userId, date),
+    };
+  }
 
   // The 추천 이유 for a scored 코디: the 근거 of the factors that added most
   // to its score, put into sentences by the LLM, or by template when it
@@ -457,12 +631,12 @@ function mostFormal(events: DayEvent[]) {
   return best;
 }
 
-// Per slot, the clothes that match the 일정's 격식 수준, falling back to those
-// one level off. Clothes two levels off are never worn to it.
-function suitableClothes(clothes: Clothing[], basis: Basis | null) {
-  if (!basis) return clothes;
+// Per slot, the clothes that match the 격식 수준, falling back to those one
+// level off. Clothes two levels off are never worn at it.
+function suitableClothes(clothes: Clothing[], formality: Formality | null) {
+  if (!formality) return clothes;
   const distance = (c: Clothing) =>
-    Math.abs(FORMALITY_LEVEL[c.formality] - FORMALITY_LEVEL[basis.formality]);
+    Math.abs(FORMALITY_LEVEL[c.formality] - FORMALITY_LEVEL[formality]);
   const suitable: Clothing[] = [];
   for (const slot of new Set(clothes.map((c) => c.slot))) {
     const inSlot = clothes.filter((c) => c.slot === slot);
@@ -472,9 +646,123 @@ function suitableClothes(clothes: Clothing[], basis: Basis | null) {
   return suitable;
 }
 
+// Colors read as light or dark for the 색상 방향 of 대화로 수정하기. Others
+// count as neither.
+const LIGHT_COLORS = new Set(["white", "beige", "yellow", "pink", "orange", "ivory", "sky"]);
+const DARK_COLORS = new Set(["black", "navy", "brown", "gray", "khaki", "purple", "charcoal"]);
+
+function hasColorDirection(color: string, direction: ColorDirection) {
+  return (direction === "lighter" ? LIGHT_COLORS : DARK_COLORS).has(color);
+}
+
+// The clothes a 코디 may be made of under the 수정 조건: none that is
+// excluded; per slot, those at the 격식 수준 and in the 색상 방향 where the
+// slot has any; and every kept piece, whatever else is asked.
+function conditioned(clothes: Clothing[], formality: Formality | null, conditions: RevisionCondition[]) {
+  const excluded = new Set(conditions.flatMap((c) => (c.type === "exclude" ? [c.clothing.id] : [])));
+  const keptIds = new Set(conditions.flatMap((c) => (c.type === "keep" ? [c.clothing.id] : [])));
+  const color = conditions.find((c) => c.type === "color");
+  const kept = clothes.filter((c) => keptIds.has(c.id));
+  let pool = suitableClothes(
+    clothes.filter((c) => !excluded.has(c.id) && !keptIds.has(c.id)),
+    formality,
+  );
+  if (color) {
+    pool = [...new Set(pool.map((c) => c.slot))].flatMap((slot) => {
+      const inSlot = pool.filter((c) => c.slot === slot);
+      const matching = inSlot.filter((c) => hasColorDirection(c.color, color.direction));
+      return matching.length ? matching : inSlot;
+    });
+  }
+  return [...kept, ...pool];
+}
+
+// The 수정 조건 the LLM answered, with the pieces they name from the 옷장.
+// Conditions naming a piece the 옷장 does not have are dropped.
+function resolved(asked: AskedCondition[], wardrobe: Clothing[]): RevisionCondition[] {
+  return asked.flatMap((c): RevisionCondition[] => {
+    if (c.type === "style" || c.type === "color") return [c];
+    const clothing = wardrobe.find(({ id }) => id === c.clothingId);
+    return clothing ? [{ type: c.type, clothing }] : [];
+  });
+}
+
+// The 수정 조건 so far with `asked` added after them. A new condition replaces
+// any earlier one it conflicts with: another 스타일 방향 or 색상 방향, any
+// condition on the same piece, or keeping another piece for the same slot.
+function accumulate(earlier: RevisionCondition[], asked: RevisionCondition[]) {
+  const clash = (a: RevisionCondition, b: RevisionCondition) => {
+    if (a.type === "style" || a.type === "color") return a.type === b.type;
+    if (b.type === "style" || b.type === "color") return false;
+    if (a.clothing.id === b.clothing.id) return true;
+    if (a.type !== "keep" || b.type !== "keep") return false;
+    const slots = new Set([a.clothing.slot, b.clothing.slot]);
+    return slots.size === 1 || (slots.has("dress") && (slots.has("top") || slots.has("bottom")));
+  };
+  let conditions = earlier;
+  for (const condition of asked) {
+    conditions = [...conditions.filter((c) => !clash(c, condition)), condition];
+  }
+  return conditions;
+}
+
+// The 격식 수준 the session's first 코디 was chosen at: its 기준 일정's, or,
+// without one, the one most of that 코디 has.
+function anchorFormality(first: Step): Formality | null {
+  if (first.basis) return first.basis.formality;
+  if (first.status !== "ok") return null;
+  const counts = new Map<Formality, number>();
+  for (const { formality } of Object.values(first.outfit)) counts.set(formality, (counts.get(formality) ?? 0) + 1);
+  return maxBy([...counts], ([, count]) => count)![0];
+}
+
+// `formality` one level toward the 스타일 방향 asked for, if any.
+function shifted(formality: Formality | null, conditions: RevisionCondition[]): Formality | null {
+  const style = conditions.find((c) => c.type === "style");
+  if (!formality || !style) return formality;
+  const level = FORMALITY_LEVEL[formality] + (style.direction === "casual" ? -1 : 1);
+  const levels = Object.keys(FORMALITY_LEVEL) as Formality[];
+  return levels[Math.min(Math.max(level, 0), levels.length - 1)];
+}
+
+const SLOTS: (keyof Outfit)[] = ["outer", "top", "bottom", "dress", "shoes"];
+
+// The slots whose piece differs between two steps, each with the 수정 조건
+// behind the change, the latest asked first.
+function changesBetween(before: Chosen, after: Chosen, conditions: RevisionCondition[]) {
+  if (before.status !== "ok" || after.status !== "ok") return [];
+  const changes: OutfitChange[] = [];
+  for (const slot of SLOTS) {
+    const from = before.outfit[slot] ?? null;
+    const to = after.outfit[slot] ?? null;
+    if (from?.id === to?.id) continue;
+    const cause =
+      [...conditions].reverse().find((c) => {
+        switch (c.type) {
+          case "exclude":
+            return from?.id === c.clothing.id;
+          case "keep":
+            return to?.id === c.clothing.id;
+          case "style": {
+            if (!from || !to) return false;
+            const delta = FORMALITY_LEVEL[to.formality] - FORMALITY_LEVEL[from.formality];
+            return c.direction === "casual" ? delta < 0 : delta > 0;
+          }
+          case "color":
+            return !!to && hasColorDirection(to.color, c.direction) && !(from && hasColorDirection(from.color, c.direction));
+        }
+      }) ?? null;
+    changes.push({ slot, from, to, cause });
+  }
+  return changes;
+}
+
 // What a 코디 is scored against.
 type ScoringFacts = {
   basis: Basis | null;
+  // The 격식 수준 the clothes should have: the basis's, or the one 대화로
+  // 수정하기 asked for instead.
+  formality: Formality | null;
   // The 기준 일정's title when the basis is its judgement, else null.
   basisTitle: string | null;
   // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
@@ -487,7 +775,7 @@ type ScoringFacts = {
 
 function score(
   outfit: Outfit,
-  { basis, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+  { basis, formality, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
 ): Scores {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -498,8 +786,8 @@ function score(
     recency: average(items.map((c) => Math.min(days(c), RECENT_DAYS) / RECENT_DAYS)),
     utilization: average(items.map((c) => Math.min(days(c), LONG_UNWORN_DAYS) / LONG_UNWORN_DAYS)),
   };
-  if (basis) {
-    scores.event = average(items.map((c) => eventFit(c, basis, otherFormalities)));
+  if (basis && formality) {
+    scores.event = average(items.map((c) => eventFit(c, formality, otherFormalities)));
   }
   if (weather) {
     scores.weather = average(items.map((c) => weatherFit(c, weather)));
@@ -529,7 +817,7 @@ function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evi
 function evidenceFor(
   factor: Factor,
   outfit: Outfit,
-  { basis, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+  { basis, formality, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
 ): Evidence | null {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -543,11 +831,11 @@ function evidenceFor(
         facts: { temperature: weather.temperature, rain: weather.rain },
       };
     case "event":
-      if (!basis) return null;
+      if (!basis || !formality) return null;
       return {
         factor,
-        clothes: items.filter((c) => eventFit(c, basis, otherFormalities) === 1),
-        facts: { kind: basis.kind, formality: basis.formality, title: basisTitle },
+        clothes: items.filter((c) => eventFit(c, formality, otherFormalities) === 1),
+        facts: { kind: basis.kind, formality, title: basisTitle },
       };
     case "color": {
       const colors = [...new Set(items.map((c) => c.color))];
@@ -588,9 +876,9 @@ function evidenceFor(
 // How well one piece suits the day's 일정: full marks at the 기준 일정's 격식
 // 수준, half one level off, less the further it is two levels off the day's
 // other 일정.
-function eventFit(clothing: Clothing, basis: Basis, otherFormalities: Formality[]) {
+function eventFit(clothing: Clothing, formality: Formality, otherFormalities: Formality[]) {
   const level = FORMALITY_LEVEL[clothing.formality];
-  const fit = 1 - Math.abs(level - FORMALITY_LEVEL[basis.formality]) / 2;
+  const fit = 1 - Math.abs(level - FORMALITY_LEVEL[formality]) / 2;
   if (!otherFormalities.length) return fit;
   const farOff = otherFormalities.filter((f) => Math.abs(level - FORMALITY_LEVEL[f]) >= 2).length;
   return Math.max(0, fit - (OTHER_EVENT_PENALTY * farOff) / otherFormalities.length);
