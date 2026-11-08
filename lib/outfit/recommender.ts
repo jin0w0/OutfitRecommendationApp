@@ -85,7 +85,8 @@ export type RevisionRequest = { message: string; outfit: Clothing[]; wardrobe: C
 // One 수정 조건 asked for in 대화로 수정하기.
 //   style: a 격식 수준 one level below (casual) or above (formal) the one the
 //     코디 was first chosen at
-//   color: lighter or darker colors, where the 옷장 has them
+//   color: lighter or darker colors in every slot the 옷장 has them for, and
+//     in one slot at least
 //   exclude: never this piece
 //   keep: always this piece (아이템 고정)
 export type RevisionCondition =
@@ -308,9 +309,13 @@ export type Recommendation = Step & {
 //     with the other 수정 조건 kept so far; `missingSlots` are the slots left
 //     without clothes.
 //   off-topic: 무관한 메시지. It asked nothing of the 코디.
+//   style-limit: it asked for a 스타일 방향 the 코디 cannot go further in: past
+//     the end of the 격식 수준, or again after the 코디 already went one level
+//     from its 일정's.
 export type UnappliedRevision =
   | { reason: "unbuildable"; message: string; unmet: RevisionCondition[]; missingSlots: Slot[] }
-  | { reason: "off-topic"; message: string };
+  | { reason: "off-topic"; message: string }
+  | { reason: "style-limit"; message: string; direction: StyleDirection };
 
 // How much of the 일정 score a piece loses when it is two 격식 수준 off every
 // other 일정 of the day. Less than a level's worth, so the 기준 일정 comes first.
@@ -489,6 +494,11 @@ export function createOutfitRecommender({
       const conditions = accumulate(earlier, asked);
       const day = dayOf(first);
       const anchor = anchorFormality(first);
+      // A 스타일 방향 that leaves the 격식 수준 where it is would change nothing.
+      const style = asked.find((c) => c.type === "style");
+      if (style && shifted(anchor, conditions) === shifted(anchor, earlier)) {
+        return { ...unchanged, unapplied: { reason: "style-limit", message, direction: style.direction } };
+      }
       const under = (some: RevisionCondition[]) =>
         outfitsUnder(wardrobeClothes, day.weather, shifted(anchor, some), some);
       const { clothes, candidates } = under(conditions);
@@ -682,7 +692,8 @@ export function createOutfitRecommender({
 }
 
 // Every 코디 the 옷장 can make for the day at `formality` under the 수정 조건,
-// and the clothes they may be made of.
+// and the clothes they may be made of. Under a 색상 방향 every 코디 has a
+// piece in it, so none when the 옷장 has no such piece to wear.
 function outfitsUnder(
   wardrobeClothes: Clothing[],
   weather: Weather | null,
@@ -692,10 +703,13 @@ function outfitsUnder(
   const kept = wardrobeClothes.filter((c) =>
     conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
   );
+  const color = conditions.find((c) => c.type === "color");
   const clothes = conditioned(wardrobeClothes, formality, conditions);
   const needsOuter = (weather !== null && weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
-  const candidates = candidateOutfits(clothes, needsOuter).filter((outfit) =>
-    kept.every((c) => Object.values(outfit).includes(c)),
+  const candidates = candidateOutfits(clothes, needsOuter).filter(
+    (outfit) =>
+      kept.every((c) => Object.values(outfit).includes(c)) &&
+      (!color || Object.values(outfit).some((c) => hasColorDirection(c.color, color.direction))),
   );
   return { clothes, candidates };
 }

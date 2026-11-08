@@ -1,4 +1,4 @@
-import type { RevisionCondition } from "@/lib/outfit/recommender";
+import type { RevisionCondition, StyleDirection } from "@/lib/outfit/recommender";
 import type { Slot } from "@/lib/outfit/wardrobe";
 
 export const SLOT_NAMES: Record<Slot, string> = {
@@ -31,7 +31,9 @@ export function conditionLabel(condition: RevisionCondition) {
 //   revision-failed: the LLM could not read it
 //   off-topic: 무관한 메시지, so the user is asked to talk about the 코디
 //   unbuildable: 구성 불가, with the 수정 조건 (as labels) that could not be met
+//   style-limit: the 코디 cannot go further in the 스타일 방향 asked for
 export type RevisionNotice =
   | { type: "revision-failed" }
   | { type: "off-topic" }
+  | { type: "style-limit"; direction: StyleDirection }
   | { type: "unbuildable"; unmet: string[]; missingSlots: Slot[] };

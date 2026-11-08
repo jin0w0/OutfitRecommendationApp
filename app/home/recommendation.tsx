@@ -191,6 +191,8 @@ function noticeText(notice: RevisionNotice) {
       return "요청을 이해하지 못해 코디를 그대로 두었어요. 다시 말씀해 주세요.";
     case "off-topic":
       return "코디와 관련된 요청만 도와드릴 수 있어요. 예: 좀 더 캐주얼하게, 이 바지 말고 다른 걸로";
+    case "style-limit":
+      return `이 일정에서는 지금보다 더 ${notice.direction === "casual" ? "캐주얼하게" : "포멀하게"} 바꿀 수 없어요. 코디는 그대로 두었어요.`;
     case "unbuildable": {
       const slots = notice.missingSlots.length
         ? ` (${notice.missingSlots.map((slot) => SLOT_NAMES[slot]).join(", ")}이(가) 부족해요)`

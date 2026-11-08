@@ -76,6 +76,10 @@ function revisionNotice(params: Record<string, string | string[] | undefined>): 
     case "revision-failed":
     case "off-topic":
       return { type: params.notice };
+    case "style-limit":
+      return params.direction === "casual" || params.direction === "formal"
+        ? { type: "style-limit", direction: params.direction }
+        : null;
     case "unbuildable":
       return {
         type: "unbuildable",
