@@ -1,5 +1,6 @@
 // The real 날씨 어댑터: 기상청 API허브's 단기예보 (VilageFcstInfoService_2.0/
-// getVilageFcst). Not tested automatically; check it by hand with a real key.
+// getVilageFcst). Only its pure helpers are tested
+// automatically, without network; check the rest by hand with a real key.
 import type { Coordinates, Weather, WeatherSource } from "./recommender";
 
 const ENDPOINT =
@@ -12,7 +13,7 @@ const AVAILABLE_AFTER_MINUTES = 10;
 // A day of rain is one with any 강수형태 or at least this 강수확률 (%).
 const RAINY_POP = 60;
 
-type ForecastItem = {
+export type ForecastItem = {
   category: string;
   fcstDate: string;
   fcstTime: string;
@@ -56,14 +57,17 @@ export function createKmaWeather({
       if (body.header.resultCode !== "00") {
         throw new Error(`기상청 단기예보 failed: ${body.header.resultCode} ${body.header.resultMsg}`);
       }
-      return dayWeather(body.body?.items.item ?? [], date.replaceAll("-", ""));
+      return dayWeather(body.body?.items.item ?? [], date.replaceAll("-", ""), kstDate(now()));
     },
   };
 }
 
-// The day's 기온 and 강수 여부 from its forecast items, or null when the issue
-// does not reach that date (단기예보 범위 밖).
-function dayWeather(items: ForecastItem[], fcstDate: string): Weather | null {
+// The day's 기온 and 강수 여부 from an issue's forecast items (dates as
+// YYYYMMDD), or null when the issue does not say enough about that date
+// (예보 없음). A day after today needs its 최저·최고기온: the last days an
+// issue reaches have only a few hours, too few to stand for the day. Today's
+// are left out of issues made after they passed, so the hours left stand in.
+export function dayWeather(items: ForecastItem[], fcstDate: string, today: string): Weather | null {
   const day = items.filter((item) => item.fcstDate === fcstDate);
   if (!day.length) return null;
   const values = (category: string) =>
@@ -74,13 +78,19 @@ function dayWeather(items: ForecastItem[], fcstDate: string): Weather | null {
   const hourly = values("TMP");
   let temperature: number;
   if (min !== undefined && max !== undefined) temperature = (min + max) / 2;
-  else if (hourly.length) temperature = hourly.reduce((sum, t) => sum + t, 0) / hourly.length;
-  else return null;
+  else if (fcstDate === today && hourly.length) {
+    temperature = hourly.reduce((sum, t) => sum + t, 0) / hourly.length;
+  } else return null;
 
   // PTY 0 is 없음; POP is a percentage.
   const rain =
     values("PTY").some((type) => type !== 0) || values("POP").some((pop) => pop >= RAINY_POP);
   return { temperature: Math.round(temperature * 10) / 10, rain };
+}
+
+// `now`'s date in KST, as YYYYMMDD.
+function kstDate(now: Date) {
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10).replaceAll("-", "");
 }
 
 // The most recent 단기예보 issue that can be fetched at `now`, in KST.
