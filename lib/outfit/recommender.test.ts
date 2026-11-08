@@ -304,11 +304,12 @@ describe("날씨", () => {
   test("on a dry day the same shoes are not penalized", async () => {
     const { recommender, weather, createUser, addClothes } = await createTestOutfit();
     const minji = await createUser("minji@gmail.com");
+    // Only the suede shoes, so the check doesn't hang on how ties between
+    // equally scored shoes are broken.
     const [, , loafers] = await addClothes(minji, [
       { name: "티셔츠", slot: "top" },
       { name: "청바지", slot: "bottom" },
       { name: "스웨이드 로퍼", slot: "shoes", material: "suede" },
-      { name: "레인부츠", slot: "shoes", material: "synthetic" },
     ]);
     weather.setForecast(DATE, { temperature: 20, rain: false });
 
