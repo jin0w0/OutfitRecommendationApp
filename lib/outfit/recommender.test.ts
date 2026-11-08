@@ -894,6 +894,31 @@ describe("추천 이유", () => {
     });
   });
 
+  test("when two or more factors added to the score there are at least two reasons, each saying only what is true", async () => {
+    const { recommender, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    // Three accent colors (no 색상 조합 score), no preferences, all worn 3
+    // days ago: only 스타일, and a little 최근 착용 and 활용도, add to the score.
+    const clothes = await addClothes(minji, [
+      { name: "빨간 티셔츠", slot: "top", color: "red" },
+      { name: "초록 바지", slot: "bottom", color: "green" },
+      { name: "노란 운동화", slot: "shoes", color: "yellow" },
+    ]);
+    await recommender.accept({ userId: minji, date: "2026-11-07", clothingIds: clothes.map((c) => c.id) });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.reasons.length).toBeGreaterThanOrEqual(2);
+    expect(result.reasons.map((r) => r.evidence.factor)).toContain("recency");
+    // Not worn in the last 3 days, which is true; not the usual 7.
+    expect(result.reasons.find((r) => r.evidence.factor === "recency")!.evidence).toMatchObject({
+      clothes: expect.arrayContaining(clothes),
+      facts: { days: 3 },
+    });
+  });
+
   test("the LLM is given only the 근거, and writes a sentence for each", async () => {
     const { recommender, llm, weather, createUser, addClothes } = await createTestOutfit();
     const minji = await createUser("minji@gmail.com");

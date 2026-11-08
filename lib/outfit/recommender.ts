@@ -185,7 +185,8 @@ export type Factor = keyof Scores;
 // it is about, and the facts that made them score well. It comes only from
 // the scoring.
 export type Evidence =
-  // The day's weather, and the pieces that suit it (any 아우터 among them).
+  // The day's weather, and the pieces that suit it (any 아우터 among them), or
+  // that suit it best when none fully does.
   | { factor: "weather"; clothes: Clothing[]; facts: Weather }
   // The 기준 일정 (or picked situation, untitled) with its own 종류 and 격식
   // 수준, and the pieces at that 격식 수준, even when 대화로 수정하기 asked
@@ -205,8 +206,10 @@ export type Evidence =
 // One 추천 이유: its 근거, and the 근거 as a sentence for the user.
 export type Reason = { evidence: Evidence; sentence: string };
 
-// How many 추천 이유 a 코디 comes with, at most.
+// How many 추천 이유 a 코디 comes with, at most, and at least when as many
+// factors added to its score.
 const MAX_REASONS = 3;
+const MIN_REASONS = 2;
 
 // The same defaults for every user for now.
 const WEIGHTS: Required<Scores> = {
@@ -938,16 +941,56 @@ const FACTORS: Factor[] = ["weather", "event", "color", "style", "preference", "
 
 // The 근거 of the factors that added most to the 코디's score (weight times
 // score), up to MAX_REASONS. Factors that added nothing, or that no piece of
-// the 코디 stands for, give no 근거.
+// the 코디 stands for, give no 근거. When that leaves fewer than
+// MIN_REASONS while more factors added something, those factors give their
+// partial 근거 too (see partialEvidence).
 function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evidence[] {
   const contribution = (factor: Factor) => WEIGHTS[factor] * (scores[factor] ?? 0);
-  return FACTORS.filter((factor) => contribution(factor) > 0)
-    .sort((a, b) => contribution(b) - contribution(a))
+  const contributing = FACTORS.filter((factor) => contribution(factor) > 0).sort(
+    (a, b) => contribution(b) - contribution(a),
+  );
+  const full = (factor: Factor) => {
+    const found = evidenceFor(factor, outfit, scoring);
+    return found && found.clothes.length ? found : null;
+  };
+  const enough = contributing.filter(full).length >= Math.min(MIN_REASONS, contributing.length);
+  return contributing
     .flatMap((factor) => {
-      const found = evidenceFor(factor, outfit, scoring);
-      return found && found.clothes.length ? [found] : [];
+      const found = full(factor) ?? (enough ? null : partialEvidence(factor, outfit, scoring));
+      return found ? [found] : [];
     })
     .slice(0, MAX_REASONS);
+}
+
+// The 근거 of a factor no piece of the 코디 fully stands for, from the pieces
+// that did best on it, with facts that hold for them. Only for factors where
+// such facts can be told: the weather (the pieces are not said to suit it
+// fully), and how long ago the pieces were worn.
+function partialEvidence(
+  factor: Factor,
+  outfit: Outfit,
+  { weather, daysSinceWorn }: ScoringFacts,
+): Evidence | null {
+  const items = Object.values(outfit);
+  const best = (value: (c: Clothing) => number) => {
+    const top = Math.max(...items.map(value));
+    return top > 0 ? { top, clothes: items.filter((c) => value(c) === top) } : null;
+  };
+  const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
+  switch (factor) {
+    case "weather": {
+      if (!weather) return null;
+      const found = best((c) => weatherFit(c, weather));
+      return found && { factor, clothes: found.clothes, facts: { temperature: weather.temperature, rain: weather.rain } };
+    }
+    case "recency":
+    case "utilization": {
+      const found = best(days);
+      return found && { factor, clothes: found.clothes, facts: { days: Math.floor(found.top) } };
+    }
+    default:
+      return null;
+  }
 }
 
 // What made `factor` score well for the 코디, from the same facts the score
