@@ -12,9 +12,10 @@ import {
   type WeatherSource,
 } from "../recommender";
 import { createWardrobe, type NewClothing } from "../wardrobe";
+import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 
-// A recommender over a real 옷장 and 착용 기록 in an in-process Postgres, next
+// A recommender over a real 옷장, 착용 기록 and 일정 판단 수정값 in an in-process Postgres, next
 // to the account tables so clothes belong to real users. `today` is the date
 // the recommender takes as today (YYYY-MM-DD).
 export async function createTestOutfit({ today = "2026-11-10" }: { today?: string } = {}) {
@@ -24,6 +25,8 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   await wardrobe.migrate();
   const wearRecords = createWearRecords({ dialect });
   await wearRecords.migrate();
+  const eventCorrections = createEventCorrections({ dialect });
+  await eventCorrections.migrate();
   const weather = new FakeWeather();
   const calendar = new FakeCalendar();
   const llm = new FakeLanguageModel();
@@ -33,6 +36,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     calendar,
     llm,
     wearRecords,
+    eventCorrections,
     today: () => today,
   });
 

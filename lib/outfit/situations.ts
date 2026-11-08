@@ -22,3 +22,7 @@ export const FORMALITY_NAMES: Record<Formality, string> = {
   "semi-formal": "세미 포멀",
   formal: "포멀",
 };
+
+export function isFormality(value: unknown): value is Formality {
+  return typeof value === "string" && Object.hasOwn(FORMALITY_NAMES, value);
+}

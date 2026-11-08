@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import type { DayEvent, Factor, Outfit, Recommendation } from "@/lib/outfit/recommender";
-import { acceptOutfit, cancelAcceptance } from "./actions";
+import { acceptOutfit, cancelAcceptance, correctEvent } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import type { Slot } from "@/lib/outfit/wardrobe";
 
@@ -94,7 +95,7 @@ export function RecommendationView({
           </span>
         )}
       </h2>
-      <EventList recommendation={recommendation} />
+      <EventList recommendation={recommendation} hidden={hidden} />
       <WeatherLine recommendation={recommendation} regionName={regionName} />
       {recommendation.status === "ok" ? (
         <>
@@ -190,10 +191,14 @@ function Reasons({
 
 // The day's 일정 from the calendar, each with its judged 일정의 종류 and 격식
 // 수준 and the 기준 일정 marked, or why they could not be read or judged. Nothing for a user without 캘린더 연동 and no 일정.
+// Each 일정's judgement can be corrected, which recommends again with it.
 function EventList({
   recommendation: { events, baseEvent, missing },
+  hidden,
 }: {
   recommendation: Recommendation;
+  // The date and picked 일정 to come back to.
+  hidden: ReactNode;
 }) {
   if (missing.includes("calendar-failed")) {
     return (
@@ -233,10 +238,63 @@ function EventList({
                 {EVENT_KINDS[event.judgement.kind].name} · {FORMALITY_NAMES[event.judgement.formality]}
               </span>
             )}
+            <CorrectEventForm event={event} hidden={hidden} />
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+// 일정 판단 직접 고치기: pick the 일정의 종류 and 격식 수준 and recommend again.
+function CorrectEventForm({ event, hidden }: { event: DayEvent; hidden: ReactNode }) {
+  const selectClass =
+    "h-9 rounded-md border border-zinc-300 bg-transparent px-2 dark:border-zinc-700";
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer text-xs text-zinc-600 underline dark:text-zinc-400">
+        {event.judgement ? "판단 고치기" : "직접 정하기"}
+      </summary>
+      <form action={correctEvent} className="mt-2 flex flex-wrap items-center gap-2">
+        {hidden}
+        <input type="hidden" name="eventId" value={event.id} />
+        <select
+          name="kind"
+          required
+          defaultValue={event.judgement?.kind ?? ""}
+          aria-label="일정의 종류"
+          className={selectClass}
+        >
+          <option value="" disabled>
+            종류
+          </option>
+          {Object.entries(EVENT_KINDS).map(([kind, { name }]) => (
+            <option key={kind} value={kind}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="formality"
+          required
+          defaultValue={event.judgement?.formality ?? ""}
+          aria-label="격식 수준"
+          className={selectClass}
+        >
+          <option value="" disabled>
+            격식
+          </option>
+          {Object.entries(FORMALITY_NAMES).map(([formality, name]) => (
+            <option key={formality} value={formality}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="h-9 rounded-full bg-foreground px-4 text-sm text-background">
+          고쳐서 다시 추천받기
+        </button>
+      </form>
+    </details>
   );
 }
 

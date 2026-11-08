@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { getOutfitRecommender } from "@/lib/outfit/server";
-import { isEventKind } from "@/lib/outfit/situations";
+import { isEventKind, isFormality } from "@/lib/outfit/situations";
 
 async function requireUserId() {
   const user = await getAccount().getCurrentUser(await headers());
@@ -32,6 +32,20 @@ export async function acceptOutfit(formData: FormData) {
   const date = dateFrom(formData);
   const clothingIds = formData.getAll("clothing").map(String);
   await getOutfitRecommender().accept({ userId, date, clothingIds });
+  backHome(formData, date);
+}
+
+// 일정 판단 직접 고치기, then back to the date for a 코디 chosen with it.
+export async function correctEvent(formData: FormData) {
+  const userId = await requireUserId();
+  const date = dateFrom(formData);
+  const eventId = formData.get("eventId");
+  const kind = formData.get("kind");
+  const formality = formData.get("formality");
+  if (typeof eventId !== "string" || !eventId || !isEventKind(kind) || !isFormality(formality)) {
+    throw new Error("Invalid 일정 correction");
+  }
+  await getOutfitRecommender().correctEvent({ userId, eventId, judgement: { kind, formality } });
   backHome(formData, date);
 }
 

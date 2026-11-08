@@ -3,6 +3,7 @@ import { PostgresDialect } from "kysely";
 import { Pool } from "pg";
 import { getAccount } from "@/lib/account/server";
 import { createGoogleCalendarEvents } from "./google-calendar-events";
+import { createEventCorrections } from "./event-corrections";
 import { createKmaWeather } from "./kma-weather";
 import { createOpenAiLanguageModel } from "./openai-llm";
 import {
@@ -16,7 +17,7 @@ import { createWearRecords } from "./wear-records";
 
 let instance: OutfitRecommender | undefined;
 
-// The app's single 코디 추천 module, over the 옷장 and 착용 기록 in Neon, the
+// The app's single 코디 추천 module, over the 옷장, 착용 기록 and 일정 판단 수정값 in Neon, the
 // 기상청 단기예보, the user's Google Calendar and OpenAI. Built on first use so that
 // `next build` does not need the secrets.
 export function getOutfitRecommender(): OutfitRecommender {
@@ -30,6 +31,7 @@ export function getOutfitRecommender(): OutfitRecommender {
       calendar: createGoogleCalendarEvents(getAccount()),
       llm: languageModel(),
       wearRecords: createWearRecords({ dialect }),
+      eventCorrections: createEventCorrections({ dialect }),
     });
   }
   return instance;
