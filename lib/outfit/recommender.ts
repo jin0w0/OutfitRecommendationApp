@@ -1,138 +1,70 @@
 // The 코디 추천 module. Callers see only its entry points; everything that goes
-// into choosing a 코디 happens inside.
+// into choosing a 코디 happens inside: scoring in scoring.ts, 수정 조건 in
+// revision.ts, and what it needs from outside in ports.ts.
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
-import type { Clothing, Formality, Material, Preferences, Slot, Style, Wardrobe } from "./wardrobe";
+import { todayInKorea } from "./dates";
+import type { Clothing, Formality, Slot, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
+import type {
+  CalendarEvent,
+  CalendarSource,
+  Coordinates,
+  EventJudgement,
+  LanguageModel,
+  Weather,
+  WeatherSource,
+} from "./ports";
+import {
+  FORMALITY_LEVEL,
+  maxBy,
+  score,
+  topEvidence,
+  total,
+  type Basis,
+  type Outfit,
+  type Reason,
+  type Scores,
+  type ScoringFacts,
+} from "./scoring";
+import {
+  accumulate,
+  changesBetween,
+  hasColorDirection,
+  resolved,
+  shifted,
+  warningsFor,
+  type Revision,
+  type RevisionCondition,
+  type UnappliedRevision,
+} from "./revision";
 
-export type Outfit = {
-  top?: Clothing;
-  bottom?: Clothing;
-  dress?: Clothing;
-  shoes: Clothing;
-  outer?: Clothing;
-};
-
-export type Coordinates = { latitude: number; longitude: number };
-
-// The day's weather: its representative 기온 in °C and whether it rains.
-export type Weather = { temperature: number; rain: boolean };
-
-// The 날씨 어댑터. Resolves to null when there is no forecast for the date
-// (예보 없음), and rejects when the forecast could not be fetched.
-export type WeatherSource = {
-  forecast(request: { date: string } & Coordinates): Promise<Weather | null>;
-};
-
-// One 일정 from the user's calendar.
-export type CalendarEvent = {
-  id: string;
-  calendarId: string;
-  title: string;
-  // YYYY-MM-DD for an 종일 일정 (end exclusive), else ISO date-times.
-  start: string;
-  end: string;
-  allDay: boolean;
-  // The 장소 as typed into the calendar, if any.
-  location: string | null;
-  // The 메모.
-  description: string | null;
-};
-
-// How the user's 캘린더 연동 stands, with the calendars they chose to use.
-export type CalendarStatus =
-  | { status: "not-connected" }
-  | { status: "reconnect-needed" }
-  | { status: "connected"; calendarIds: string[] };
-
-// The 캘린더 어댑터, read-only.
-export type CalendarSource = {
-  status(userId: string): Promise<CalendarStatus>;
-  // The 일정 on `date` (Korean time) in one calendar, 종일 일정 included.
-  // Resolves to null once Google stops accepting the connection (expired or
-  // revoked), and rejects when the calendar could not be read otherwise.
-  eventsOn(request: { userId: string; calendarId: string; date: string }): Promise<
-    CalendarEvent[] | null
-  >;
-};
-
-// What the LLM is told about one 일정: only what judging it needs. Never its
-// 참석자, id or time.
-export type EventText = { title: string; description: string | null; location: string | null };
-
-// The 일정의 종류 and 격식 수준 judged for one 일정.
-export type EventJudgement = { kind: EventKind; formality: Formality };
-
-// The LLM 어댑터. Every method takes and returns structured data, and rejects
-// when the LLM could not answer.
-export type LanguageModel = {
-  // One judgement per 일정, in the same order.
-  judgeEvents(events: EventText[]): Promise<EventJudgement[]>;
-  // One short sentence per 근거, in the same order, saying only what the
-  // 근거 holds.
-  writeReasons(evidence: Evidence[]): Promise<string[]>;
-  // The 수정 조건 a 대화 message asks for, in the order asked. `outfit` is the
-  // 코디 the user is looking at and `wardrobe` their whole 옷장, so that
-  // conditions can name pieces ("이 바지") by clothing id.
-  interpretRevision(request: RevisionRequest): Promise<AskedCondition[]>;
-};
-
-export type RevisionRequest = { message: string; outfit: Clothing[]; wardrobe: Clothing[] };
-
-// One 수정 조건 asked for in 대화로 수정하기.
-//   style: a 격식 수준 one level below (casual) or above (formal) the one the
-//     코디 was first chosen at
-//   color: lighter or darker colors, where the 옷장 has them
-//   exclude: never this piece
-//   keep: always this piece (아이템 고정)
-export type RevisionCondition =
-  | { type: "style"; direction: StyleDirection }
-  | { type: "color"; direction: ColorDirection }
-  | { type: "exclude"; clothing: Clothing }
-  | { type: "keep"; clothing: Clothing };
-
-// A 수정 조건 as the LLM answers it, naming pieces by clothing id, or
-// off-topic for a message that has nothing to do with the 코디 (무관한 메시지).
-export type AskedCondition =
-  | Extract<RevisionCondition, { type: "style" | "color" }>
-  | { type: "exclude" | "keep"; clothingId: string }
-  | { type: "off-topic" };
-
-export type StyleDirection = "casual" | "formal";
-export type ColorDirection = "lighter" | "darker";
-
-// One slot of the 코디 that a 수정 changed: what it held before and after
-// (null for none), and the 수정 조건 that made the change, or null when it
-// changed only to go with the rest of the 코디.
-export type OutfitChange = {
-  slot: keyof Outfit;
-  from: Clothing | null;
-  to: Clothing | null;
-  cause: RevisionCondition | null;
-};
-
-// What makes a 추천 결과 a 수정 결과: the message, every 수정 조건 asked for
-// in the session so far (a later one replacing any it conflicts with), how
-// the 코디 differs from the one before, and what the user should be warned of
-// about the 수정, which went ahead anyway.
-export type Revision = {
-  message: string;
-  conditions: RevisionCondition[];
-  changes: OutfitChange[];
-  warnings: RevisionWarning[];
-};
-
-// Something about a 수정 the user should know although it was made.
-//   formality-conflict: these 수정 조건 take the 코디 away from the 격식 수준
-//     of the 일정 it is for (the 기준 일정, or the situation picked)
-export type RevisionWarning = {
-  type: "formality-conflict";
-  basis: Basis;
-  conditions: RevisionCondition[];
-};
+export type {
+  AskedCondition,
+  CalendarEvent,
+  CalendarSource,
+  CalendarStatus,
+  Coordinates,
+  EventJudgement,
+  EventText,
+  LanguageModel,
+  RevisionRequest,
+  Weather,
+  WeatherSource,
+} from "./ports";
+export type { Basis, Evidence, Factor, Outfit, Reason, Scores } from "./scoring";
+export type {
+  ColorDirection,
+  OutfitChange,
+  Revision,
+  RevisionCondition,
+  RevisionWarning,
+  StyleDirection,
+  UnappliedRevision,
+} from "./revision";
 
 // One of the day's 일정 with what was judged of it, or null when it could not
 // be judged.
@@ -141,6 +73,8 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 // Information the recommendation had to go without.
 //   no-forecast: the date is outside the forecast range (날씨 미반영)
 //   weather-failed: the 날씨 어댑터 failed
+//   unknown-place: the 기준 일정's 장소 names no place the weather can be
+//     looked up for, so it is the 기본 지역's
 //   calendar-reconnect-needed: the 캘린더 연동 expired or was revoked, so the
 //     user should see the 재연동 안내
 //   calendar-failed: the 캘린더 어댑터 failed otherwise
@@ -153,80 +87,20 @@ export type DayEvent = CalendarEvent & { judgement: EventJudgement | null };
 export type MissingInfo =
   | "no-forecast"
   | "weather-failed"
+  | "unknown-place"
   | "calendar-reconnect-needed"
   | "calendar-failed"
   | "llm-failed"
   | "reasons-llm-failed"
   | "revision-llm-failed";
 
-// The 일정 the 코디 is chosen for: its 일정의 종류 and 격식 수준.
-export type Basis = EventJudgement;
-
-// 0..1 per factor. A factor that did not apply (e.g. 일정 with 일정 없음) is absent.
-// `recency` is low for clothes worn in the last few days (최근 착용 기록);
-// `utilization` is high for clothes not worn in a long time (활용도).
-export type Scores = {
-  weather?: number;
-  event?: number;
-  color: number;
-  style: number;
-  preference: number;
-  recency: number;
-  utilization: number;
-};
-
-export type Factor = keyof Scores;
-
-// The 근거 behind one 추천 이유: a factor of the score, the pieces of the 코디
-// it is about, and the facts that made them score well. It comes only from
-// the scoring.
-export type Evidence =
-  // The day's weather, and the pieces that suit it (any 아우터 among them).
-  | { factor: "weather"; clothes: Clothing[]; facts: Weather }
-  // The 기준 일정 (or picked situation, untitled), and the pieces at the 격식 수준 the
-  // 코디 was chosen at: the 일정's, or the one 대화로 수정하기 asked for.
-  | { factor: "event"; clothes: Clothing[]; facts: Basis & { title: string | null } }
-  // Every color of the 코디, and those of them that are not neutral.
-  | { factor: "color"; clothes: Clothing[]; facts: { colors: string[]; accents: string[] } }
-  // The style most of the 코디 shares, and the pieces in it.
-  | { factor: "style"; clothes: Clothing[]; facts: { style: Style } }
-  // The user's preferred colors and styles that the pieces match.
-  | { factor: "preference"; clothes: Clothing[]; facts: { colors: string[]; styles: Style[] } }
-  // The pieces not worn in the last `days` days.
-  | { factor: "recency"; clothes: Clothing[]; facts: { days: number } }
-  // The pieces not worn for at least `days` days, or never.
-  | { factor: "utilization"; clothes: Clothing[]; facts: { days: number } };
-
-// One 추천 이유: its 근거, and the 근거 as a sentence for the user.
-export type Reason = { evidence: Evidence; sentence: string };
-
-// How many 추천 이유 a 코디 comes with, at most.
-const MAX_REASONS = 3;
-
-// The same defaults for every user for now.
-const WEIGHTS: Required<Scores> = {
-  weather: 3,
-  event: 3,
-  color: 2,
-  style: 1,
-  preference: 2,
-  recency: 2,
-  utilization: 1,
-};
-
-// Clothes worn within this many days count as recently worn.
-const RECENT_DAYS = 7;
-// Clothes not worn for this many days, or never, get the full 활용도 score.
-const LONG_UNWORN_DAYS = 30;
-
-// 소재 that rain ruins.
-const RAIN_WEAK_MATERIALS = new Set<Material>(["suede", "canvas"]);
-
-// Colors that go with anything; a 코디 reads well with at most one other.
-const NEUTRAL_COLORS = new Set(["black", "white", "gray", "navy", "beige", "brown"]);
-
 type RecommendationContext = {
   date: string;
+  // What 날짜로 추천받기 was asked for besides the date: the situation the
+  // user picked and where the 코디 is worn. Absent from steps stored before
+  // they were kept.
+  situation: EventKind | null;
+  location: Coordinates;
   // The day's 일정 from the calendars the user chose, in the order they happen.
   events: DayEvent[];
   // The 기준 일정 the 코디 is chosen for: the most formal of the day's 일정
@@ -244,25 +118,27 @@ type RecommendationContext = {
 };
 
 // What the day is, as 날짜로 추천받기 found it. Every 수정 in the session is
-// for the same day.
-type Day = Omit<RecommendationContext, "accepted">;
+// for the same day, until 일정 판단 직접 고치기 finds it again.
+type FoundDay = Omit<RecommendationContext, "accepted">;
 
 // A 추천 세션 step as stored: the 추천 결과, which is a 수정 결과 unless
 // `revision` is null (날짜로 추천받기's).
-type Step = Chosen & { revision: Revision | null };
+type Step = OutfitChoice & { revision: Revision | null };
 
-// The day of a session's first step, as stored. The 기준 일정 is the one among
-// the day's 일정 again, as 날짜로 추천받기 returned it.
-function dayOf(first: Step): Day {
-  const { date, events, baseEvent, basis, weather, weatherPlace } = first;
+// The day of a session step, as stored. The 기준 일정 is the one among the
+// day's 일정 again, as it was returned.
+function dayOf(step: Step): FoundDay {
+  const { date, situation, location, events, baseEvent, basis, weather, weatherPlace } = step;
   return {
     date,
+    situation,
+    location,
     events,
     baseEvent: baseEvent && (events.find((e) => e.calendarId === baseEvent.calendarId && e.id === baseEvent.id) ?? null),
     basis,
     weather,
     weatherPlace,
-    missing: first.missing.filter((m) => DAY_MISSING.includes(m)),
+    missing: step.missing.filter((m) => DAY_MISSING.includes(m)),
   };
 }
 
@@ -270,6 +146,7 @@ function dayOf(first: Step): Day {
 const DAY_MISSING: MissingInfo[] = [
   "no-forecast",
   "weather-failed",
+  "unknown-place",
   "calendar-reconnect-needed",
   "calendar-failed",
   "llm-failed",
@@ -280,7 +157,7 @@ const DAY_MISSING: MissingInfo[] = [
 export type Accepted = { status: WearStatus; clothes: Clothing[] } | null;
 
 // The 코디 chosen for the day, or why there is none.
-type Chosen = RecommendationContext &
+type OutfitChoice = RecommendationContext &
   (
     // `reasons`: the 추천 이유, from the factors that added most to the score.
     | { status: "ok"; outfit: Outfit; scores: Scores; reasons: Reason[] }
@@ -298,23 +175,8 @@ export type Recommendation = Step & {
   unapplied: UnappliedRevision | null;
 };
 
-// A 대화 message that left the 코디 as it was.
-//   unbuildable: 구성 불가. The 옷장 has no 코디 that meets `unmet` together
-//     with the other 수정 조건 kept so far; `missingSlots` are the slots left
-//     without clothes.
-//   off-topic: 무관한 메시지. It asked nothing of the 코디.
-export type UnappliedRevision =
-  | { reason: "unbuildable"; message: string; unmet: RevisionCondition[]; missingSlots: Slot[] }
-  | { reason: "off-topic"; message: string };
-
-// How much of the 일정 score a piece loses when it is two 격식 수준 off every
-// other 일정 of the day. Less than a level's worth, so the 기준 일정 comes first.
-const OTHER_EVENT_PENALTY = 0.25;
-
 // Below this 기온 (°C) the 코디 gets an 아우터.
 const OUTER_BELOW = 17;
-
-const FORMALITY_LEVEL: Record<Formality, number> = { casual: 0, "semi-formal": 1, formal: 2 };
 
 export function createOutfitRecommender({
   wardrobe,
@@ -413,29 +275,9 @@ export function createOutfitRecommender({
       location: Coordinates;
       shown?: string[][];
     }): Promise<Recommendation> {
-      const missing: MissingInfo[] = [];
-      const calendarDay = await dayEvents(userId, date);
-      if (calendarDay.failure) missing.push(calendarDay.failure);
-      const { events, failed } = await judged(userId, calendarDay.events);
-      if (failed) missing.push("llm-failed");
-      const baseEvent = mostFormal(events) ?? events[0] ?? null;
-      const basis =
-        baseEvent?.judgement ??
-        (situation && { kind: situation, formality: EVENT_KINDS[situation].formality });
-
-      // The 기준 일정's 장소 when it names a known place, else the 기본 지역.
-      const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
-      const { latitude, longitude } = place ?? location;
-      let weather: Weather | null = null;
-      try {
-        weather = await weatherSource.forecast({ date, latitude, longitude });
-        if (!weather) missing.push("no-forecast");
-      } catch {
-        missing.push("weather-failed");
-      }
-      const day: Day = { date, events, baseEvent, basis, weather, weatherPlace: place?.name ?? null, missing };
+      const day = await findDay(userId, date, situation, location);
       const step = await recommend(userId, day, await wardrobe.clothes(userId), {
-        formality: basis?.formality ?? null,
+        formality: day.basis?.formality ?? null,
         conditions: [],
         shown,
       });
@@ -458,12 +300,11 @@ export function createOutfitRecommender({
     }): Promise<Recommendation> {
       const session = await sessions.get<Step>(userId, sessionId);
       if (!session) throw new Error("No such 추천 세션");
-      const first = session.steps[0];
       const last = session.steps.at(-1)!;
       // The latest step, left as it was.
       const unchanged = { ...last, sessionId, step: session.steps.length - 1 };
       const wardrobeClothes = await wardrobe.clothes(userId);
-      let asked: RevisionCondition[];
+      let asked: ReturnType<typeof resolved>;
       try {
         asked = resolved(
           await llm.interpretRevision({
@@ -476,13 +317,21 @@ export function createOutfitRecommender({
       } catch {
         return { ...unchanged, missing: [...last.missing, "revision-llm-failed"], unapplied: null };
       }
-      // Nothing asked of the 코디 (or only of pieces the 옷장 does not have):
-      // the user is asked to talk about the 코디 instead.
-      if (!asked.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
+      // A piece the user meant could not be told: nothing is changed rather
+      // than the rest of the message applied without it.
+      if (asked.unknownClothing) return { ...unchanged, unapplied: { reason: "unknown-clothing", message } };
+      // Nothing asked of the 코디: the user is asked to talk about the 코디
+      // instead.
+      if (!asked.conditions.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
       const earlier = last.revision?.conditions ?? [];
-      const conditions = accumulate(earlier, asked);
-      const day = dayOf(first);
-      const anchor = anchorFormality(first);
+      const conditions = accumulate(earlier, asked.conditions);
+      const day = dayOf(last);
+      const anchor = anchorFormality(day, session.steps[0]);
+      // A 스타일 방향 that leaves the 격식 수준 where it is would change nothing.
+      const style = asked.conditions.find((c) => c.type === "style");
+      if (style && shifted(anchor, conditions) === shifted(anchor, earlier)) {
+        return { ...unchanged, unapplied: { reason: "style-limit", message, direction: style.direction } };
+      }
       const under = (some: RevisionCondition[]) =>
         outfitsUnder(wardrobeClothes, day.weather, shifted(anchor, some), some);
       const { clothes, candidates } = under(conditions);
@@ -505,7 +354,7 @@ export function createOutfitRecommender({
         message,
         conditions,
         changes: changesBetween(last, step, conditions),
-        warnings: warningsFor(first, conditions),
+        warnings: warningsFor(day.basis, conditions),
       };
       await sessions.saveSteps<Step>(userId, sessionId, [...session.steps, { ...step, revision }]);
       return { ...step, sessionId, step: session.steps.length, revision, unapplied: null };
@@ -561,16 +410,41 @@ export function createOutfitRecommender({
 
     // 일정 판단 직접 고치기: from now on the user's 일정 `eventId` (a calendar
     // 일정 식별자) is taken to be `judgement`, whatever the LLM would say.
+    // In the 추천 세션 `sessionId`, the day is found again with the
+    // correction and its 코디 chosen anew under the 수정 조건 so far, as one
+    // more step; the steps before it can still be gone back to. Resolves to
+    // that step, or to null without a session to continue (none given, gone,
+    // or stored before sessions kept what the day was asked for).
     async correctEvent({
       userId,
       eventId,
       judgement,
+      sessionId,
     }: {
       userId: string;
       eventId: string;
       judgement: EventJudgement;
-    }) {
+      sessionId?: string;
+    }): Promise<Recommendation | null> {
       await eventCorrections.save(userId, eventId, judgement);
+      const session = sessionId && (await sessions.get<Step>(userId, sessionId));
+      if (!session) return null;
+      const last = session.steps.at(-1)!;
+      if (!last.location) return null;
+      const day = await findDay(userId, last.date, last.situation ?? null, last.location);
+      const conditions = last.revision?.conditions ?? [];
+      const step = await recommend(userId, day, await wardrobe.clothes(userId), {
+        formality: shifted(anchorFormality(day, session.steps[0]), conditions),
+        conditions,
+        shown: [],
+      });
+      const revision: Revision | null = last.revision && {
+        ...last.revision,
+        changes: changesBetween(last, step, conditions),
+        warnings: warningsFor(day.basis, conditions),
+      };
+      await sessions.saveSteps<Step>(userId, session.id, [...session.steps, { ...step, revision }]);
+      return { ...step, sessionId: session.id, step: session.steps.length, revision, unapplied: null };
     },
 
     // 수락 취소: forgets the 착용 기록 or plan for `date`.
@@ -579,21 +453,53 @@ export function createOutfitRecommender({
     },
   };
 
+  // The day on `date`: its 일정 from the calendar, judged; the 기준 일정 and
+  // the basis the 코디 is chosen for (the picked `situation` without a judged
+  // 일정); and the weather where it is worn: at the 기준 일정's 장소 when it
+  // names a known place, else at `location` (the 기본 지역).
+  async function findDay(
+    userId: string,
+    date: string,
+    situation: EventKind | null,
+    location: Coordinates,
+  ): Promise<FoundDay> {
+    const missing: MissingInfo[] = [];
+    const calendarDay = await dayEvents(userId, date);
+    if (calendarDay.failure) missing.push(calendarDay.failure);
+    const { events, failed } = await judged(userId, calendarDay.events);
+    if (failed) missing.push("llm-failed");
+    const baseEvent = mostFormal(events) ?? events[0] ?? null;
+    const basis =
+      baseEvent?.judgement ?? (situation && { kind: situation, formality: EVENT_KINDS[situation].formality });
+
+    const place = baseEvent?.location ? regionOfPlace(baseEvent.location) : null;
+    if (baseEvent?.location && !place) missing.push("unknown-place");
+    const { latitude, longitude } = place ?? location;
+    let weather: Weather | null = null;
+    try {
+      weather = await weatherSource.forecast({ date, latitude, longitude });
+      if (!weather) missing.push("no-forecast");
+    } catch {
+      missing.push("weather-failed");
+    }
+    return { date, situation, location, events, baseEvent, basis, weather, weatherPlace: place?.name ?? null, missing };
+  }
+
   // The best 코디 for the day from `wardrobeClothes`, chosen at `formality`
   // under the 수정 조건, and explained. Both entry points choose through this.
   async function recommend(
     userId: string,
-    day: Day,
+    day: FoundDay,
     wardrobeClothes: Clothing[],
     {
       formality,
       conditions,
       shown,
     }: { formality: Formality | null; conditions: RevisionCondition[]; shown: string[][] },
-  ): Promise<Chosen> {
+  ): Promise<OutfitChoice> {
     const missing = [...day.missing];
     const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
-    const scoring = await scoringFacts(userId, day, formality);
+    const scoring = await scoringFacts(userId, day);
     const { clothes, candidates } = outfitsUnder(wardrobeClothes, day.weather, formality, conditions);
     const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
     const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
@@ -622,13 +528,14 @@ export function createOutfitRecommender({
       : null;
   }
 
-  // What every 코디 for the day is scored against, with clothes wanted at
-  // `formality`.
-  async function scoringFacts(userId: string, day: Day, formality: Formality | null): Promise<ScoringFacts> {
+  // What every 코디 for the day is scored against. The 일정 score is always
+  // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
+  // 격식 수준: the clothes are chosen at that one, but are not said to suit
+  // the 일정 better than they do.
+  async function scoringFacts(userId: string, day: FoundDay): Promise<ScoringFacts> {
     const { events, baseEvent, basis, weather, date } = day;
     return {
       basis,
-      formality,
       basisTitle: baseEvent?.judgement ? baseEvent.title : null,
       // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
       otherFormalities: events.flatMap((event) =>
@@ -675,7 +582,8 @@ export function createOutfitRecommender({
 }
 
 // Every 코디 the 옷장 can make for the day at `formality` under the 수정 조건,
-// and the clothes they may be made of.
+// and the clothes they may be made of. Under a 색상 방향 every 코디 has a
+// piece in it, so none when the 옷장 has no such piece to wear.
 function outfitsUnder(
   wardrobeClothes: Clothing[],
   weather: Weather | null,
@@ -685,10 +593,13 @@ function outfitsUnder(
   const kept = wardrobeClothes.filter((c) =>
     conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
   );
+  const color = conditions.find((c) => c.type === "color");
   const clothes = conditioned(wardrobeClothes, formality, conditions);
   const needsOuter = (weather !== null && weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
-  const candidates = candidateOutfits(clothes, needsOuter).filter((outfit) =>
-    kept.every((c) => Object.values(outfit).includes(c)),
+  const candidates = candidateOutfits(clothes, needsOuter).filter(
+    (outfit) =>
+      kept.every((c) => Object.values(outfit).includes(c)) &&
+      (!color || Object.values(outfit).some((c) => hasColorDirection(c.color, color.direction))),
   );
   return { clothes, candidates };
 }
@@ -702,11 +613,6 @@ function outfitKey(outfit: Outfit) {
 
 function daysBetween(from: string, to: string) {
   return (Date.parse(to) - Date.parse(from)) / 86_400_000;
-}
-
-function todayInKorea() {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 }
 
 // 종일 일정 first, then by start time.
@@ -741,15 +647,6 @@ function suitableClothes(clothes: Clothing[], formality: Formality | null) {
   return suitable;
 }
 
-// Colors read as light or dark for the 색상 방향 of 대화로 수정하기. Others
-// count as neither.
-const LIGHT_COLORS = new Set(["white", "beige", "yellow", "pink", "orange", "ivory", "sky"]);
-const DARK_COLORS = new Set(["black", "navy", "brown", "gray", "khaki", "purple", "charcoal"]);
-
-function hasColorDirection(color: string, direction: ColorDirection) {
-  return (direction === "lighter" ? LIGHT_COLORS : DARK_COLORS).has(color);
-}
-
 // The clothes a 코디 may be made of under the 수정 조건: none that is
 // excluded; per slot, those at the 격식 수준 and in the 색상 방향 where the
 // slot has any; and every kept piece, whatever else is asked.
@@ -772,288 +669,14 @@ function conditioned(clothes: Clothing[], formality: Formality | null, condition
   return [...kept, ...pool];
 }
 
-// The 수정 조건 the LLM answered, with the pieces they name from the 옷장.
-// Conditions naming a piece the 옷장 does not have are dropped, as is
-// off-topic, which asks nothing of the 코디.
-function resolved(asked: AskedCondition[], wardrobe: Clothing[]): RevisionCondition[] {
-  return asked.flatMap((c): RevisionCondition[] => {
-    if (c.type === "off-topic") return [];
-    if (c.type === "style" || c.type === "color") return [c];
-    const clothing = wardrobe.find(({ id }) => id === c.clothingId);
-    return clothing ? [{ type: c.type, clothing }] : [];
-  });
-}
-
-// The 수정 조건 so far with `asked` added after them. A new condition replaces
-// any earlier one it conflicts with: another 스타일 방향 or 색상 방향, any
-// condition on the same piece, or keeping another piece for the same slot.
-function accumulate(earlier: RevisionCondition[], asked: RevisionCondition[]) {
-  const clash = (a: RevisionCondition, b: RevisionCondition) => {
-    if (a.type === "style" || a.type === "color") return a.type === b.type;
-    if (b.type === "style" || b.type === "color") return false;
-    if (a.clothing.id === b.clothing.id) return true;
-    if (a.type !== "keep" || b.type !== "keep") return false;
-    const slots = new Set([a.clothing.slot, b.clothing.slot]);
-    return slots.size === 1 || (slots.has("dress") && (slots.has("top") || slots.has("bottom")));
-  };
-  let conditions = earlier;
-  for (const condition of asked) {
-    conditions = [...conditions.filter((c) => !clash(c, condition)), condition];
-  }
-  return conditions;
-}
-
-// The 격식 수준 the session's first 코디 was chosen at: its 기준 일정's, or,
-// without one, the one most of that 코디 has.
-function anchorFormality(first: Step): Formality | null {
-  if (first.basis) return first.basis.formality;
+// The 격식 수준 a 스타일 방향 moves away from: the day's basis's, or, without
+// one, the one most of the session's first 코디 has.
+function anchorFormality(day: FoundDay, first: Step): Formality | null {
+  if (day.basis) return day.basis.formality;
   if (first.status !== "ok") return null;
   const counts = new Map<Formality, number>();
   for (const { formality } of Object.values(first.outfit)) counts.set(formality, (counts.get(formality) ?? 0) + 1);
   return maxBy([...counts], ([, count]) => count)![0];
-}
-
-// `formality` one level toward the 스타일 방향 asked for, if any.
-function shifted(formality: Formality | null, conditions: RevisionCondition[]): Formality | null {
-  const style = conditions.find((c) => c.type === "style");
-  if (!formality || !style) return formality;
-  const level = FORMALITY_LEVEL[formality] + (style.direction === "casual" ? -1 : 1);
-  const levels = Object.keys(FORMALITY_LEVEL) as Formality[];
-  return levels[Math.min(Math.max(level, 0), levels.length - 1)];
-}
-
-// The 격식 충돌 of the 수정 조건 with the 일정 the session's 코디 is for: a
-// 스타일 방향 that moves the 코디 off its 격식 수준, and kept pieces of
-// another 격식 수준.
-function warningsFor(first: Step, conditions: RevisionCondition[]): RevisionWarning[] {
-  const { basis } = first;
-  if (!basis) return [];
-  const clashing = conditions.filter((c) => {
-    if (c.type === "style") return shifted(basis.formality, [c]) !== basis.formality;
-    if (c.type === "keep") return c.clothing.formality !== basis.formality;
-    return false;
-  });
-  return clashing.length ? [{ type: "formality-conflict", basis, conditions: clashing }] : [];
-}
-
-const SLOTS: (keyof Outfit)[] = ["outer", "top", "bottom", "dress", "shoes"];
-
-// The slots whose piece differs between two steps, each with the 수정 조건
-// behind the change, the latest asked first.
-function changesBetween(before: Chosen, after: Chosen, conditions: RevisionCondition[]) {
-  if (before.status !== "ok" || after.status !== "ok") return [];
-  const changes: OutfitChange[] = [];
-  for (const slot of SLOTS) {
-    const from = before.outfit[slot] ?? null;
-    const to = after.outfit[slot] ?? null;
-    if (from?.id === to?.id) continue;
-    const cause =
-      [...conditions].reverse().find((c) => {
-        switch (c.type) {
-          case "exclude":
-            return from?.id === c.clothing.id;
-          case "keep":
-            return to?.id === c.clothing.id;
-          case "style": {
-            if (!from || !to) return false;
-            const delta = FORMALITY_LEVEL[to.formality] - FORMALITY_LEVEL[from.formality];
-            return c.direction === "casual" ? delta < 0 : delta > 0;
-          }
-          case "color":
-            return !!to && hasColorDirection(to.color, c.direction) && !(from && hasColorDirection(from.color, c.direction));
-        }
-      }) ?? null;
-    changes.push({ slot, from, to, cause });
-  }
-  return changes;
-}
-
-// What a 코디 is scored against.
-type ScoringFacts = {
-  basis: Basis | null;
-  // The 격식 수준 the clothes should have: the basis's, or the one 대화로
-  // 수정하기 asked for instead.
-  formality: Formality | null;
-  // The 기준 일정's title when the basis is its judgement, else null.
-  basisTitle: string | null;
-  // The 격식 수준 of the day's judged 일정 other than the 기준 일정.
-  otherFormalities: Formality[];
-  weather: Weather | null;
-  preferences: Preferences;
-  // Per clothing id, days since its latest 착용 기록. Absent if never worn.
-  daysSinceWorn: Map<string, number>;
-};
-
-function score(
-  outfit: Outfit,
-  { basis, formality, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
-): Scores {
-  const items = Object.values(outfit);
-  const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
-  const scores: Scores = {
-    color: colorHarmony(items),
-    style: styleConsistency(items),
-    preference: average(items.map((c) => preferenceMatch(c, preferences))),
-    recency: average(items.map((c) => Math.min(days(c), RECENT_DAYS) / RECENT_DAYS)),
-    utilization: average(items.map((c) => Math.min(days(c), LONG_UNWORN_DAYS) / LONG_UNWORN_DAYS)),
-  };
-  if (basis && formality) {
-    scores.event = average(items.map((c) => eventFit(c, formality, otherFormalities)));
-  }
-  if (weather) {
-    scores.weather = average(items.map((c) => weatherFit(c, weather)));
-  }
-  return scores;
-}
-
-// The order factors are listed in, which also settles equal contributions.
-const FACTORS: Factor[] = ["weather", "event", "color", "style", "preference", "recency", "utilization"];
-
-// The 근거 of the factors that added most to the 코디's score (weight times
-// score), up to MAX_REASONS. Factors that added nothing, or that no piece of
-// the 코디 stands for, give no 근거.
-function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evidence[] {
-  const contribution = (factor: Factor) => WEIGHTS[factor] * (scores[factor] ?? 0);
-  return FACTORS.filter((factor) => contribution(factor) > 0)
-    .sort((a, b) => contribution(b) - contribution(a))
-    .flatMap((factor) => {
-      const found = evidenceFor(factor, outfit, scoring);
-      return found && found.clothes.length ? [found] : [];
-    })
-    .slice(0, MAX_REASONS);
-}
-
-// What made `factor` score well for the 코디, from the same facts the score
-// came from. Null when the factor did not apply.
-function evidenceFor(
-  factor: Factor,
-  outfit: Outfit,
-  { basis, formality, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
-): Evidence | null {
-  const items = Object.values(outfit);
-  const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
-  switch (factor) {
-    case "weather":
-      if (!weather) return null;
-      return {
-        factor,
-        // An 아우터 is there for the weather, however well it fits.
-        clothes: items.filter((c) => c.slot === "outer" || weatherFit(c, weather) === 1),
-        facts: { temperature: weather.temperature, rain: weather.rain },
-      };
-    case "event":
-      if (!basis || !formality) return null;
-      return {
-        factor,
-        clothes: items.filter((c) => eventFit(c, formality, otherFormalities) === 1),
-        facts: { kind: basis.kind, formality, title: basisTitle },
-      };
-    case "color": {
-      const colors = [...new Set(items.map((c) => c.color))];
-      return {
-        factor,
-        clothes: items,
-        facts: { colors, accents: colors.filter((color) => !NEUTRAL_COLORS.has(color)) },
-      };
-    }
-    case "style": {
-      const counts = new Map<Style, number>();
-      for (const { style } of items) counts.set(style, (counts.get(style) ?? 0) + 1);
-      const style = maxBy([...counts], ([, count]) => count)![0];
-      return { factor, clothes: items.filter((c) => c.style === style), facts: { style } };
-    }
-    case "preference": {
-      const clothes = items.filter((c) => preferenceMatch(c, preferences) > 0);
-      return {
-        factor,
-        clothes,
-        facts: {
-          colors: preferences.colors.filter((color) => clothes.some((c) => c.color === color)),
-          styles: preferences.styles.filter((style) => clothes.some((c) => c.style === style)),
-        },
-      };
-    }
-    case "recency":
-      return { factor, clothes: items.filter((c) => days(c) >= RECENT_DAYS), facts: { days: RECENT_DAYS } };
-    case "utilization":
-      return {
-        factor,
-        clothes: items.filter((c) => days(c) >= LONG_UNWORN_DAYS),
-        facts: { days: LONG_UNWORN_DAYS },
-      };
-  }
-}
-
-// How well one piece suits the day's 일정: full marks at the 기준 일정's 격식
-// 수준, half one level off, less the further it is two levels off the day's
-// other 일정.
-function eventFit(clothing: Clothing, formality: Formality, otherFormalities: Formality[]) {
-  const level = FORMALITY_LEVEL[clothing.formality];
-  const fit = 1 - Math.abs(level - FORMALITY_LEVEL[formality]) / 2;
-  if (!otherFormalities.length) return fit;
-  const farOff = otherFormalities.filter((f) => Math.abs(level - FORMALITY_LEVEL[f]) >= 2).length;
-  return Math.max(0, fit - (OTHER_EVENT_PENALTY * farOff) / otherFormalities.length);
-}
-
-// How well one piece suits the day: its 두께 against the 기온, and, on a rainy
-// day, whether its 소재 stands up to rain.
-function weatherFit(clothing: Clothing, { temperature, rain }: Weather) {
-  if (rain && RAIN_WEAK_MATERIALS.has(clothing.material)) return 0;
-  const target = clothing.slot === "outer" ? outerWarmth(temperature) : baseWarmth(temperature);
-  return 1 - Math.abs(clothing.warmth - target) / 2;
-}
-
-// The 두께 that suits the 기온 for what is worn under any 아우터.
-function baseWarmth(temperature: number) {
-  return temperature >= 23 ? 1 : temperature >= 10 ? 2 : 3;
-}
-
-// The 두께 that suits the 기온 for an 아우터.
-function outerWarmth(temperature: number) {
-  return temperature >= 12 ? 1 : temperature >= 5 ? 2 : 3;
-}
-
-function total(scores: Scores) {
-  return Object.entries(scores).reduce(
-    (sum, [factor, value]) => sum + WEIGHTS[factor as keyof Scores] * value,
-    0,
-  );
-}
-
-function colorHarmony(items: Clothing[]) {
-  const accents = new Set(items.map((c) => c.color).filter((color) => !NEUTRAL_COLORS.has(color)));
-  return accents.size <= 1 ? 1 : accents.size === 2 ? 0.5 : 0;
-}
-
-// The share of the 코디 in its most common style.
-function styleConsistency(items: Clothing[]) {
-  const counts = new Map<string, number>();
-  for (const { style } of items) counts.set(style, (counts.get(style) ?? 0) + 1);
-  return Math.max(...counts.values()) / items.length;
-}
-
-// How well one piece matches what the user likes, counting only the kinds of
-// preference they have set.
-function preferenceMatch(clothing: Clothing, { colors, styles }: Preferences) {
-  const matches = [];
-  if (colors.length) matches.push(colors.includes(clothing.color) ? 1 : 0);
-  if (styles.length) matches.push(styles.includes(clothing.style) ? 1 : 0);
-  return matches.length ? average(matches) : 0;
-}
-
-// The first item with the highest key, so ties go to the clothes added first.
-function maxBy<T>(items: T[], key: (item: T) => number): T | undefined {
-  let best: T | undefined;
-  let bestKey = -Infinity;
-  for (const item of items) {
-    const k = key(item);
-    if (k > bestKey) [best, bestKey] = [item, k];
-  }
-  return best;
-}
-
-function average(values: number[]) {
-  return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
 function missingSlots(clothes: Clothing[]): Slot[] {

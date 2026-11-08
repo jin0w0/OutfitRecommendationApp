@@ -8,7 +8,7 @@ import { isEventKind } from "@/lib/outfit/situations";
 import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
 import { OutfitRequestForm, RecommendationView } from "./recommendation";
-import { isSlot, type RevisionNotice } from "./revision-labels";
+import { homeDate, noticeFrom, shownFrom } from "./home-state";
 
 export default function Home({ searchParams }: PageProps<"/home">) {
   return (
@@ -27,15 +27,11 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   if (user.needsOnboarding || user.shouldInviteCalendar) redirect("/onboarding");
 
   const params = await searchParams;
-  const date =
-    typeof params.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.date)
-      ? params.date
-      : todayInKorea();
+  const date = homeDate(params.date);
   const situation = isEventKind(params.situation) ? params.situation : null;
   // Onboarding above guarantees a 기본 지역.
   const { name: regionName, latitude, longitude } = user.homeRegion!;
-  // 코디 already shown for this date (다시 추천받기), each as dot-joined clothing ids.
-  const shown = [params.shown ?? []].flat().map((outfit) => outfit.split("."));
+  const shown = shownFrom(params);
   const recommender = getOutfitRecommender();
   // The 추천 세션 being revised, if it is still there, else a fresh 추천.
   const sessionId = typeof params.session === "string" ? params.session : null;
@@ -64,27 +60,10 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         regionName={regionName}
         situation={situation}
         shown={shown}
-        notice={continued ? revisionNotice(params) : null}
+        notice={continued ? noticeFrom(params) : null}
       />
     </>
   );
-}
-
-// What the last 대화 message changed nothing for, as reviseOutfit put it in the URL.
-function revisionNotice(params: Record<string, string | string[] | undefined>): RevisionNotice | null {
-  switch (params.notice) {
-    case "revision-failed":
-    case "off-topic":
-      return { type: params.notice };
-    case "unbuildable":
-      return {
-        type: "unbuildable",
-        unmet: [params.unmet ?? []].flat(),
-        missingSlots: [params.missingSlot ?? []].flat().filter(isSlot),
-      };
-    default:
-      return null;
-  }
 }
 
 function UserBar({ user }: { user: CurrentUser }) {
@@ -105,9 +84,4 @@ function UserBar({ user }: { user: CurrentUser }) {
       </form>
     </header>
   );
-}
-
-function todayInKorea() {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 }

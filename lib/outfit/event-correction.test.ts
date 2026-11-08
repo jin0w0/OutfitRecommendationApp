@@ -188,3 +188,36 @@ describe("일정 판단 직접 고치기", () => {
     });
   });
 });
+
+describe("일정 판단 직접 고치기 during a 추천 세션", () => {
+  test("continues the session: the outfit is chosen for the correction, the 수정 조건 so far are kept, and the step before can be gone back to", async () => {
+    const { recommender, llm, addClothes, minji, event, casual, formal } = await minjiWithWedding();
+    const [tee] = await addClothes(minji, [{ name: "티셔츠", slot: "top", formality: "casual" }]);
+    const first = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+    llm.interpret("후드티는 빼줘", [{ type: "exclude", clothingId: casual.top.id }]);
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "후드티는 빼줘" });
+
+    const corrected = await recommender.correctEvent({
+      userId: minji,
+      eventId: event.id,
+      judgement: { kind: "appointment", formality: "casual" },
+      sessionId: first.sessionId,
+    });
+
+    expect(corrected).toMatchObject({
+      sessionId: first.sessionId,
+      step: 2,
+      basis: { kind: "appointment", formality: "casual" },
+      outfit: { top: tee, bottom: casual.bottom, shoes: casual.shoes },
+      revision: { conditions: [{ type: "exclude", clothing: casual.top }] },
+    });
+    expect(await recommender.latest({ userId: minji, sessionId: first.sessionId })).toMatchObject({
+      step: 2,
+      outfit: { top: tee },
+    });
+    expect(await recommender.undo({ userId: minji, sessionId: first.sessionId, step: 1 })).toMatchObject({
+      outfit: formal,
+      revision: revised.revision,
+    });
+  });
+});

@@ -57,6 +57,31 @@ describe("recommending an outfit from the 옷장 alone", () => {
     expect(result.outfit).toEqual({ dress, shoes: flats });
   });
 
+  test("the 옷장 lists clothes in the order they were added, even when added at the same moment", async () => {
+    // Ties in the score go to the clothes listed first, so this order must
+    // not change from one run to the next.
+    const { wardrobe, createUser } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const names = Array.from({ length: 12 }, (_, n) => `흰 티셔츠 ${n}`);
+    // Added without waiting for each other, so several share a 등록 time.
+    await Promise.all(
+      names.map((name) =>
+        wardrobe.addClothing(minji, {
+          name,
+          slot: "top",
+          color: "white",
+          seasons: ["spring", "summer", "autumn", "winter"],
+          style: "casual",
+          formality: "casual",
+          warmth: 2,
+          material: "cotton",
+        }),
+      ),
+    );
+
+    expect((await wardrobe.clothes(minji)).map((c) => c.name)).toEqual(names);
+  });
+
   test("without shoes the 옷장 cannot make an outfit, and says shoes are missing", async () => {
     const { recommender, createUser, addClothes } = await createTestOutfit();
     const minji = await createUser("minji@gmail.com");
@@ -234,6 +259,31 @@ describe("날씨", () => {
     const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
 
     expect(result).toMatchObject({ status: "ok", outfit: { outer: coat } });
+  });
+
+  test("on a rainy 6°C day a winter long padding is chosen over a thin spring-and-autumn denim jacket", async () => {
+    const { recommender, weather, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, , , , padding] = await addClothes(minji, [
+      { name: "맨투맨", slot: "top", color: "gray" },
+      { name: "청바지", slot: "bottom", color: "blue", material: "denim" },
+      { name: "흰 운동화", slot: "shoes", color: "white", material: "leather" },
+      // Added first, so it would win any tie.
+      {
+        name: "데님 재킷",
+        slot: "outer",
+        color: "blue",
+        seasons: ["spring", "autumn"],
+        warmth: 1,
+        material: "denim",
+      },
+      { name: "검정 롱패딩", slot: "outer", color: "black", seasons: ["winter"], warmth: 3, material: "synthetic" },
+    ]);
+    weather.setForecast(DATE, { temperature: 6, rain: true });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", outfit: { outer: padding } });
   });
 
   test("on a 25°C day there is no outer and thin clothes are chosen", async () => {
@@ -462,6 +512,24 @@ describe("캘린더 일정", () => {
 
     expect(weather.requests).toEqual([{ date: DATE, ...SEOUL }]);
     expect(result.weatherPlace).toBeNull();
+  });
+
+  test.each([
+    ["names no known place", "우리 집", true],
+    ["has no 장소", null, false],
+  ])("when the 기준 일정 %s, the result says whether its 장소 could not be used for the weather", async (_, location, unknown) => {
+    const { recommender, calendar, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "스터디",
+      start: `${DATE}T19:00:00+09:00`,
+      end: `${DATE}T21:00:00+09:00`,
+      location,
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.missing.includes("unknown-place")).toBe(unknown);
   });
 
   test("when the 연동 has expired the outfit comes without 일정, saying the calendar failed", async () => {
@@ -823,6 +891,31 @@ describe("추천 이유", () => {
     expect(evidence("preference")).toMatchObject({
       clothes: expect.arrayContaining([tee, jeans, sneakers]),
       facts: { colors: ["navy"], styles: [] },
+    });
+  });
+
+  test("when two or more factors added to the score there are at least two reasons, each saying only what is true", async () => {
+    const { recommender, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    // Three accent colors (no 색상 조합 score), no preferences, all worn 3
+    // days ago: only 스타일, and a little 최근 착용 and 활용도, add to the score.
+    const clothes = await addClothes(minji, [
+      { name: "빨간 티셔츠", slot: "top", color: "red" },
+      { name: "초록 바지", slot: "bottom", color: "green" },
+      { name: "노란 운동화", slot: "shoes", color: "yellow" },
+    ]);
+    await recommender.accept({ userId: minji, date: "2026-11-07", clothingIds: clothes.map((c) => c.id) });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.reasons.length).toBeGreaterThanOrEqual(2);
+    expect(result.reasons.map((r) => r.evidence.factor)).toContain("recency");
+    // Not worn in the last 3 days, which is true; not the usual 7.
+    expect(result.reasons.find((r) => r.evidence.factor === "recency")!.evidence).toMatchObject({
+      clothes: expect.arrayContaining(clothes),
+      facts: { days: 3 },
     });
   });
 

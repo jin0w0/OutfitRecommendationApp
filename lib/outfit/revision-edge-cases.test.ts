@@ -79,6 +79,56 @@ describe("구성 불가", () => {
     expect(revised.unapplied).toMatchObject({ reason: "unbuildable", unmet: [{ type: "exclude", clothing: jeans }] });
     expect(revised.revision).toEqual(lighter.revision);
   });
+
+  test("\"밝은 색으로\" when the 옷장 has nothing light says the 색상 방향 cannot be met and keeps the outfit", async () => {
+    const { recommender, llm, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    await addClothes(minji, [
+      { name: "검정 티셔츠", slot: "top", color: "black" },
+      { name: "남색 티셔츠", slot: "top", color: "navy" },
+      { name: "검정 바지", slot: "bottom", color: "black" },
+      { name: "검정 운동화", slot: "shoes", color: "black" },
+    ]);
+    const first = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+    if (first.status !== "ok") throw new Error("expected an outfit");
+    llm.interpret("밝은 색으로", [{ type: "color", direction: "lighter" }]);
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "밝은 색으로" });
+
+    expect(revised).toMatchObject({
+      outfit: first.outfit,
+      revision: null,
+      unapplied: { reason: "unbuildable", unmet: [{ type: "color", direction: "lighter" }], missingSlots: [] },
+    });
+  });
+});
+
+describe("스타일 방향의 끝", () => {
+  test("\"포멀하게\" for a 결혼식 already at the most formal says so and keeps the outfit", async () => {
+    const { recommender, llm, minji, first } = await minjiFor("wedding");
+    llm.interpret("좀 더 포멀하게", [{ type: "style", direction: "formal" }]);
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 포멀하게" });
+
+    expect(revised).toMatchObject({
+      outfit: first.outfit,
+      revision: null,
+      unapplied: { reason: "style-limit", message: "좀 더 포멀하게", direction: "formal" },
+    });
+  });
+
+  test("\"캐주얼하게\" asked again says the outfit is already as casual as it goes", async () => {
+    const { recommender, minji, first } = await minjiFor("work");
+    const casual = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 캐주얼하게" });
+
+    const again = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 캐주얼하게" });
+
+    expect(again).toMatchObject({
+      step: casual.step,
+      revision: casual.revision,
+      unapplied: { reason: "style-limit", direction: "casual" },
+    });
+  });
 });
 
 describe("무관한 메시지", () => {
@@ -111,6 +161,21 @@ describe("무관한 메시지", () => {
   });
 });
 
+describe("옷장에 없는 옷을 가리킨 메시지", () => {
+  test("leaves the outfit as it was and says the piece could not be identified", async () => {
+    const { recommender, llm, minji, first } = await minjiFor("work");
+    llm.interpret("그 빨간 코트 말고", [{ type: "exclude", clothingId: "no-such-clothing" }]);
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "그 빨간 코트 말고" });
+
+    expect(revised).toMatchObject({
+      outfit: first.outfit,
+      revision: null,
+      unapplied: { reason: "unknown-clothing", message: "그 빨간 코트 말고" },
+    });
+  });
+});
+
 describe("되돌리기", () => {
   test("back to the first 추천 brings back its outfit and no 수정 조건", async () => {
     const { recommender, minji, first } = await minjiFor("work");
@@ -133,11 +198,16 @@ describe("되돌리기", () => {
     await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "바지만 바꿔줘" });
     expect(casual.step).toBe(1);
 
+    if (casual.status !== "ok") throw new Error("expected an outfit");
+
     const undone = await recommender.undo({ userId: minji, sessionId: first.sessionId, step: 1 });
-    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 캐주얼하게" });
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "바지만 바꿔줘" });
 
     expect(undone).toMatchObject({ revision: casual.revision, step: 1 });
-    expect(revised.revision?.conditions).toEqual([{ type: "style", direction: "casual" }]);
+    expect(revised.revision?.conditions).toEqual([
+      { type: "style", direction: "casual" },
+      { type: "exclude", clothing: casual.outfit.bottom },
+    ]);
     expect(revised.step).toBe(2);
   });
 
@@ -166,5 +236,23 @@ describe("격식 충돌 경고", () => {
         conditions: [{ type: "style", direction: "casual" }],
       },
     ]);
+  });
+
+  test("an outfit made less formal than its 결혼식 loses 일정 score, and no 추천 이유 says it suits the 결혼식", async () => {
+    const { recommender, minji, first } = await minjiFor("wedding");
+    expect(first).toMatchObject({ status: "ok", scores: { event: 1 } });
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 캐주얼하게" });
+
+    expect(revised.status).toBe("ok");
+    if (revised.status !== "ok") return;
+    expect(revised.scores.event).toBeLessThan(1);
+    for (const { evidence } of revised.reasons) {
+      if (evidence.factor !== "event") continue;
+      // What the 근거 says of the 일정 is the 일정's own 종류 and 격식 수준,
+      // and only clothes at that 격식 수준 are said to suit it.
+      expect(evidence.facts).toMatchObject({ kind: "wedding", formality: "formal" });
+      expect(evidence.clothes.every((c) => c.formality === "formal")).toBe(true);
+    }
   });
 });

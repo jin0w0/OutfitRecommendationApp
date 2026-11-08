@@ -286,9 +286,10 @@ describe("수정 결과", () => {
       expect(sentence.startsWith(FAKE_SENTENCE)).toBe(true);
       expect(evidence.clothes.every((c) => pieces.includes(c.id))).toBe(true);
     }
-    expect(revised.reasons.find((r) => r.evidence.factor === "event")?.evidence).toMatchObject({
-      facts: { kind: "work", formality: "casual" },
-    });
+    // The 출근 is still semi-formal however casual the outfit was made.
+    for (const { evidence } of revised.reasons) {
+      if (evidence.factor === "event") expect(evidence.facts).toMatchObject({ kind: "work", formality: "semi-formal" });
+    }
   });
 
   test("is for the same day: the 일정 and weather found for the first", async () => {
