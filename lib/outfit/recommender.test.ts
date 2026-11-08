@@ -360,3 +360,174 @@ describe("날씨", () => {
     });
   });
 });
+
+describe("캘린더 일정", () => {
+  async function connectedMinji() {
+    const outfit = await createTestOutfit();
+    const minji = await outfit.createUser("minji@gmail.com");
+    await outfit.addClothes(minji, [
+      { name: "티셔츠", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    outfit.calendar.connect(minji, ["personal"]);
+    return { ...outfit, minji };
+  }
+
+  test("only the day's events from the calendars the user chose are in the result", async () => {
+    const { recommender, calendar, minji } = await connectedMinji();
+    const lunch = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "점심 약속",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T13:00:00+09:00`,
+    });
+    calendar.addEvent(minji, {
+      calendarId: "holidays",
+      title: "고르지 않은 캘린더의 일정",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T10:00:00+09:00`,
+    });
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "다음 날 일정",
+      start: "2026-11-11T09:00:00+09:00",
+      end: "2026-11-11T10:00:00+09:00",
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", events: [lunch], baseEvent: lunch });
+  });
+
+  test("종일 일정 are included, and the day's events come in the order they happen", async () => {
+    const { recommender, calendar, minji } = await connectedMinji();
+    calendar.connect(minji, ["personal", "work"]);
+    const dinner = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "저녁 약속",
+      start: `${DATE}T18:00:00+09:00`,
+      end: `${DATE}T20:00:00+09:00`,
+    });
+    const workshop = calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "워크숍",
+      start: DATE,
+      end: "2026-11-11",
+    });
+    const meeting = calendar.addEvent(minji, {
+      calendarId: "work",
+      title: "팀 회의",
+      start: `${DATE}T09:00:00+09:00`,
+      end: `${DATE}T10:00:00+09:00`,
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result.events).toEqual([workshop, meeting, dinner]);
+    expect(workshop.allDay).toBe(true);
+  });
+
+  test("for an 일정 in another region the weather there is used", async () => {
+    const { recommender, calendar, weather, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "친구 결혼식",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T14:00:00+09:00`,
+      location: "부산광역시 해운대구 센텀남대로 35",
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(weather.requests).toEqual([{ date: DATE, latitude: 35.1796, longitude: 129.0756 }]);
+    expect(result.weatherPlace).toBe("부산");
+  });
+
+  test.each([
+    ["has no 장소", null],
+    ["has a 장소 that names no known place", "우리 집"],
+  ])("for an 일정 that %s the 기본 지역's weather is used", async (_, location) => {
+    const { recommender, calendar, weather, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "스터디",
+      start: `${DATE}T19:00:00+09:00`,
+      end: `${DATE}T21:00:00+09:00`,
+      location,
+    });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(weather.requests).toEqual([{ date: DATE, ...SEOUL }]);
+    expect(result.weatherPlace).toBeNull();
+  });
+
+  test("when the 연동 has expired the outfit comes without 일정, saying the calendar failed", async () => {
+    const { recommender, calendar, weather, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "점심 약속",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T13:00:00+09:00`,
+    });
+    calendar.expire(minji);
+    weather.setForecast(DATE, { temperature: 20, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      events: [],
+      baseEvent: null,
+      missing: ["calendar-reconnect-needed"],
+    });
+  });
+
+  test("when Google refuses the connection while reading 일정, it counts as expired", async () => {
+    const { recommender, calendar, weather, minji } = await connectedMinji();
+    calendar.addEvent(minji, {
+      calendarId: "personal",
+      title: "점심 약속",
+      start: `${DATE}T12:00:00+09:00`,
+      end: `${DATE}T13:00:00+09:00`,
+    });
+    calendar.revokeAtGoogle(minji);
+    weather.setForecast(DATE, { temperature: 20, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", events: [], missing: ["calendar-reconnect-needed"] });
+  });
+
+  test("when the calendar cannot be read the outfit comes without 일정, saying the calendar failed", async () => {
+    const { recommender, calendar, weather, minji } = await connectedMinji();
+    calendar.failWith();
+    weather.setForecast(DATE, { temperature: 20, rain: false });
+
+    const result = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(result).toMatchObject({ status: "ok", events: [], baseEvent: null, missing: ["calendar-failed"] });
+  });
+
+  test("a user without 캘린더 연동 is recommended for the situation they picked, without reading any calendar", async () => {
+    const { recommender, calendar, createUser, addClothes } = await createTestOutfit();
+    const junho = await createUser("junho@gmail.com");
+    await addClothes(junho, [
+      { name: "셔츠", slot: "top", formality: "semi-formal" },
+      { name: "슬랙스", slot: "bottom", formality: "semi-formal" },
+      { name: "로퍼", slot: "shoes", formality: "semi-formal" },
+    ]);
+
+    const result = await recommender.recommendForDate({ userId: junho, date: DATE, situation: "work", location: SEOUL });
+
+    expect(calendar.eventRequests).toEqual([]);
+    expect(result).toMatchObject({
+      status: "ok",
+      events: [],
+      baseEvent: null,
+      basis: { kind: "work", formality: "semi-formal" },
+      missing: ["no-forecast"],
+    });
+  });
+});

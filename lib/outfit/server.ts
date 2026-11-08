@@ -1,14 +1,16 @@
 import "server-only";
 import { PostgresDialect } from "kysely";
 import { Pool } from "pg";
+import { getAccount } from "@/lib/account/server";
+import { createGoogleCalendarEvents } from "./google-calendar-events";
 import { createKmaWeather } from "./kma-weather";
 import { createOutfitRecommender, type OutfitRecommender, type WeatherSource } from "./recommender";
 import { createWardrobe } from "./wardrobe";
 
 let instance: OutfitRecommender | undefined;
 
-// The app's single 코디 추천 module, over the 옷장 in Neon and the 기상청
-// 단기예보. Built on first use so that `next build` does not need the secrets.
+// The app's single 코디 추천 module, over the 옷장 in Neon, the 기상청
+// 단기예보 and the user's Google Calendar. Built on first use so that `next build` does not need the secrets.
 export function getOutfitRecommender(): OutfitRecommender {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Missing environment variable DATABASE_URL");
@@ -17,6 +19,7 @@ export function getOutfitRecommender(): OutfitRecommender {
       dialect: new PostgresDialect({ pool: new Pool({ connectionString }) }),
     }),
     weather: weatherSource(),
+    calendar: createGoogleCalendarEvents(getAccount()),
   });
   return instance;
 }
