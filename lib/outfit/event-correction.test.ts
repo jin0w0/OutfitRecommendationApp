@@ -221,3 +221,50 @@ describe("일정 판단 직접 고치기 during a 추천 세션", () => {
     });
   });
 });
+
+describe("캘린더 연동 해제", () => {
+  test("after the calendar is disconnected, corrected 일정 go back to the LLM's judgement", async () => {
+    const { recommender, minji, event, formal } = await minjiWithWedding();
+    await recommender.correctEvent({
+      userId: minji,
+      eventId: event.id,
+      judgement: { kind: "appointment", formality: "casual" },
+    });
+
+    await recommender.forgetCalendar(minji);
+    const after = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+
+    expect(after).toMatchObject({
+      events: [{ id: event.id, judgement: { kind: "wedding", formality: "formal" } }],
+      outfit: formal,
+    });
+  });
+
+  test("forgetting one user's calendar keeps another user's corrections", async () => {
+    const outfit = await minjiWithWedding();
+    const { recommender, calendar, minji, event } = outfit;
+    const jun = await outfit.createUser("jun@gmail.com");
+    calendar.connect(jun, ["personal"]);
+    await outfit.addClothes(jun, [
+      { name: "셔츠", slot: "top" },
+      { name: "바지", slot: "bottom" },
+      { name: "신발", slot: "shoes" },
+    ]);
+    const junEvent = calendar.addEvent(jun, {
+      calendarId: "personal",
+      title: "동창 모임",
+      start: `${DATE}T18:00:00+09:00`,
+      end: `${DATE}T20:00:00+09:00`,
+    });
+    for (const [userId, eventId] of [[minji, event.id], [jun, junEvent.id]]) {
+      await recommender.correctEvent({ userId, eventId, judgement: { kind: "date", formality: "casual" } });
+    }
+
+    await recommender.forgetCalendar(minji);
+    const junAfter = await recommender.recommendForDate({ userId: jun, date: DATE, situation: null, location: SEOUL });
+
+    expect(junAfter).toMatchObject({
+      events: [{ id: junEvent.id, judgement: { kind: "date", formality: "casual" } }],
+    });
+  });
+});

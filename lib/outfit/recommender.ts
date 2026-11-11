@@ -451,6 +451,12 @@ export function createOutfitRecommender({
     async cancelAcceptance({ userId, date }: { userId: string; date: string }) {
       await wearRecords.remove(userId, date);
     },
+
+    // The user's 캘린더 연동 is gone: drops what was kept about their calendar
+    // 일정 (the 일정 판단 수정값). 착용 기록 and 추천 세션 stay.
+    async forgetCalendar(userId: string) {
+      await eventCorrections.forgetAll(userId);
+    },
   };
 
   // The day on `date`: its 일정 from the calendar, judged; the 기준 일정 and

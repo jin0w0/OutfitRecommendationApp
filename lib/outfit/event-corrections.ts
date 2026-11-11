@@ -43,6 +43,11 @@ export function createEventCorrections({ dialect }: { dialect: Dialect }) {
         .execute();
     },
 
+    // Every correction the user made.
+    async forgetAll(userId: string) {
+      await db.deleteFrom("event_correction").where("user_id", "=", userId).execute();
+    },
+
     // The user's corrections among these 일정, by 일정 식별자.
     async forEvents(userId: string, eventIds: string[]): Promise<Map<string, EventCorrection>> {
       if (!eventIds.length) return new Map();

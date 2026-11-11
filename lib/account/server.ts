@@ -26,6 +26,11 @@ export function getAccount(): Account {
       clientSecret: env("GOOGLE_CLIENT_SECRET"),
     },
     tokenEncryptionKey: env("TOKEN_ENCRYPTION_KEY"),
+    // Imported when needed: the outfit module's own wiring imports this file.
+    onCalendarDisconnected: async (userId) => {
+      const { getOutfitRecommender } = await import("@/lib/outfit/server");
+      await getOutfitRecommender().forgetCalendar(userId);
+    },
     // Lets server actions set and clear the session cookie.
     plugins: [nextCookies()],
   });
