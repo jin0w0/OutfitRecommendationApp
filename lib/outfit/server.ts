@@ -15,8 +15,49 @@ import {
 import { createWardrobe } from "./wardrobe";
 import { createWearRecords } from "./wear-records";
 import { createRecommendationSessions } from "./recommendation-sessions";
+import { createCloset, type Closet } from "./closet";
+import { createNeonPhotoStorage } from "./neon-photo-storage";
+import { createOpenAiClothingVision } from "./openai-vision";
 
 let instance: OutfitRecommender | undefined;
+let closetInstance: Closet | undefined;
+
+function requiredEnv(name: string) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing environment variable ${name}`);
+  return value;
+}
+
+// The app's single 옷장 module, over the 옷장 in Neon, photos in Neon Object
+// Storage and OpenAI to look at them. Built on first use, like the recommender.
+export function getCloset(): Closet {
+  closetInstance ??= createCloset({
+    wardrobe: createWardrobe({
+      dialect: new PostgresDialect({ pool: new Pool({ connectionString: requiredEnv("DATABASE_URL") }) }),
+    }),
+    photos: createNeonPhotoStorage({
+      endpoint: requiredEnv("AWS_ENDPOINT_URL_S3"),
+      region: requiredEnv("AWS_REGION"),
+      accessKeyId: requiredEnv("AWS_ACCESS_KEY_ID"),
+      secretAccessKey: requiredEnv("AWS_SECRET_ACCESS_KEY"),
+      bucket: requiredEnv("CLOTHING_PHOTO_BUCKET"),
+    }),
+    vision: clothingVision(),
+  });
+  return closetInstance;
+}
+
+// Without a key every analysis fails, so 옷 등록 goes on with an empty draft
+// for the user to fill.
+function clothingVision() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey) return createOpenAiClothingVision({ apiKey, model: process.env.OPENAI_MODEL || undefined });
+  return {
+    async look(): Promise<never> {
+      throw new Error("Missing environment variable OPENAI_API_KEY");
+    },
+  };
+}
 
 // The app's single 코디 추천 module, over the 옷장, 착용 기록, 일정 판단 수정값 and 추천 세션 in Neon, the
 // 기상청 단기예보, the user's Google Calendar and OpenAI. Built on first use so that

@@ -2,7 +2,7 @@
 // cannot write them.
 import type { Evidence } from "./scoring";
 import { EVENT_KINDS, FORMALITY_NAMES } from "./situations";
-import type { Clothing, Style } from "./wardrobe";
+import type { Clothing, Color, Style } from "./wardrobe";
 
 export const STYLE_NAMES: Record<Style, string> = {
   casual: "캐주얼",
@@ -12,7 +12,7 @@ export const STYLE_NAMES: Record<Style, string> = {
   sporty: "스포티",
 };
 
-const COLOR_NAMES: Record<string, string> = {
+export const COLOR_NAMES: Record<Color, string> = {
   black: "검정",
   white: "흰색",
   gray: "회색",
@@ -27,10 +27,11 @@ const COLOR_NAMES: Record<string, string> = {
   purple: "보라",
   orange: "주황",
   khaki: "카키",
+  skyblue: "하늘색",
 };
 
 export function colorName(color: string) {
-  return COLOR_NAMES[color] ?? color;
+  return COLOR_NAMES[color as Color] ?? color;
 }
 
 export function templateSentence(evidence: Evidence): string {

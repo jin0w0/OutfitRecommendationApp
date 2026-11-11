@@ -10,9 +10,13 @@
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "db:migrate": "node --env-file=.env scripts/migrate.ts",
-    "db:seed": "node --env-file=.env scripts/seed-wardrobe.ts"
+    "db:seed": "node --env-file=.env scripts/seed-wardrobe.ts",
+    "check:photos": "node --env-file=.env scripts/check-photos.ts",
+    "check:vision": "node --env-file=.env scripts/check-vision.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1166.0",
+    "@aws-sdk/s3-request-presigner": "^3.1166.0",
     "@neondatabase/serverless": "^1.2.0",
     "better-auth": "^1.7.16",
     "kysely": "^0.29.8",

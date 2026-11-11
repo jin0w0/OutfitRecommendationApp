@@ -17,6 +17,8 @@ import { createWardrobe, type NewClothing } from "../wardrobe";
 import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
+import { createCloset } from "../closet";
+import { FakeClothingVision, FakePhotoStorage } from "./fake-closet";
 
 // A recommender over a real 옷장, 착용 기록 and 일정 판단 수정값 in an in-process Postgres, next
 // to the account tables so clothes belong to real users. `today` is the date
@@ -45,6 +47,10 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     sessions,
     today: () => today,
   });
+
+  const photos = new FakePhotoStorage();
+  const vision = new FakeClothingVision();
+  const closet = createCloset({ wardrobe, photos, vision });
 
   const signedIn = new Map<string, Headers>();
 
@@ -80,7 +86,19 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     return added;
   }
 
-  return { wardrobe, weather, calendar, llm, recommender, createUser, deleteAccount, addClothes };
+  return {
+    wardrobe,
+    weather,
+    calendar,
+    llm,
+    recommender,
+    closet,
+    photos,
+    vision,
+    createUser,
+    deleteAccount,
+    addClothes,
+  };
 }
 
 // Seoul, where the tests' users live.
