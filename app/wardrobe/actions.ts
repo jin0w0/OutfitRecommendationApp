@@ -83,3 +83,17 @@ export async function replaceClothingPhoto(formData: FormData): Promise<Register
   }
   return { ok: true };
 }
+
+// 정리하기, then back to the 옷장.
+export async function tidyClothing(formData: FormData) {
+  const userId = await requireUserId();
+  await getCloset().tidy(userId, String(formData.get("clothingId")));
+  redirect("/wardrobe");
+}
+
+// 되돌리기, staying on the 정리한 옷 list.
+export async function restoreClothing(formData: FormData) {
+  const userId = await requireUserId();
+  await getCloset().restore(userId, String(formData.get("clothingId")));
+  redirect("/wardrobe/tidied");
+}

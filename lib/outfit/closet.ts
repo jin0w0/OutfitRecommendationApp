@@ -127,6 +127,17 @@ export function createCloset({
     // 옷장 보기.
     clothes: (userId: string) => wardrobe.clothes(userId),
 
+    // 정리하기 and 되돌리기, and the 정리한 옷.
+    async tidy(userId: string, clothingId: string) {
+      if (!(await wardrobe.setTidied(userId, clothingId, true))) throw new Error("No such piece for this user");
+    },
+
+    async restore(userId: string, clothingId: string) {
+      if (!(await wardrobe.setTidied(userId, clothingId, false))) throw new Error("No such piece for this user");
+    },
+
+    tidiedClothes: (userId: string) => wardrobe.tidiedClothes(userId),
+
     // One piece of the user's 옷장, or null if it is not theirs.
     async clothing(userId: string, clothingId: string): Promise<Clothing | null> {
       return (await wardrobe.clothes(userId)).find((c) => c.id === clothingId) ?? null;

@@ -197,7 +197,7 @@ export function createOutfitRecommender({
   sessions,
   today = todayInKorea,
 }: {
-  wardrobe: Pick<Wardrobe, "clothes" | "preferences">;
+  wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "preferences">;
   weather: WeatherSource;
   calendar: CalendarSource;
   llm: LanguageModel;
@@ -380,7 +380,7 @@ export function createOutfitRecommender({
         ...last,
         sessionId,
         step: session.steps.length - 1,
-        accepted: await acceptedOn(userId, last.date, await wardrobe.clothes(userId)),
+        accepted: await acceptedOn(userId, last.date),
         unapplied: null,
       };
     },
@@ -401,7 +401,7 @@ export function createOutfitRecommender({
         ...back,
         sessionId,
         step,
-        accepted: await acceptedOn(userId, back.date, await wardrobe.clothes(userId)),
+        accepted: await acceptedOn(userId, back.date),
         unapplied: null,
       };
     },
@@ -513,7 +513,7 @@ export function createOutfitRecommender({
     }: { formality: Formality | null; conditions: RevisionCondition[]; shown: string[][] },
   ): Promise<OutfitChoice> {
     const missing = [...day.missing];
-    const context = { ...day, missing, accepted: await acceptedOn(userId, day.date, wardrobeClothes) };
+    const context = { ...day, missing, accepted: await acceptedOn(userId, day.date) };
     const scoring = await scoringFacts(userId, day);
     const { clothes, candidates } = outfitsUnder(wardrobeClothes, day.weather, formality, conditions);
     const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
@@ -533,14 +533,16 @@ export function createOutfitRecommender({
     return { status: "ok", ...context, ...best, reasons };
   }
 
-  async function acceptedOn(userId: string, date: string, wardrobeClothes: Clothing[]): Promise<Accepted> {
+  // What was accepted for `date`, shown with every piece in it, also ones
+  // 정리 since.
+  async function acceptedOn(userId: string, date: string): Promise<Accepted> {
     const record = await wearRecords.onDate(userId, date);
-    return record
-      ? {
-          status: record.status,
-          clothes: record.clothingIds.flatMap((id) => wardrobeClothes.filter((c) => c.id === id)),
-        }
-      : null;
+    if (!record) return null;
+    const clothes = await wardrobe.clothesIncludingTidied(userId);
+    return {
+      status: record.status,
+      clothes: record.clothingIds.flatMap((id) => clothes.filter((c) => c.id === id)),
+    };
   }
 
   // What every 코디 for the day is scored against. The 일정 score is always

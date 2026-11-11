@@ -294,3 +294,65 @@ describe("고치기", () => {
     expect(photos.keys()).toHaveLength(1);
   });
 });
+
+describe("정리하기", () => {
+  const DAY = "2026-11-12";
+  const SEOUL_AT = { latitude: 37.5665, longitude: 126.978 };
+
+  // 민지 with two tops, the first of which she will tidy away.
+  async function minjiWithTwoTops() {
+    const outfit = await createTestOutfit({ today: DAY });
+    const minji = await outfit.createUser("minji@gmail.com");
+    const [oldTop, otherTop, jeans, sneakers] = await outfit.addClothes(minji, [
+      { name: "낡은 티", slot: "top" },
+      { name: "새 티", slot: "top" },
+      { name: "청바지", slot: "bottom" },
+      { name: "운동화", slot: "shoes" },
+    ]);
+    const recommend = () =>
+      outfit.recommender.recommendForDate({ userId: minji, date: DAY, situation: null, location: SEOUL_AT });
+    return { ...outfit, minji, oldTop, otherTop, jeans, sneakers, recommend };
+  }
+
+  test("a tidied piece leaves the 옷장 for the tidied list, and restoring brings it back", async () => {
+    const { closet, minji, oldTop } = await minjiWithTwoTops();
+
+    await closet.tidy(minji, oldTop.id);
+    expect((await closet.clothes(minji)).map((c) => c.id)).not.toContain(oldTop.id);
+    expect((await closet.tidiedClothes(minji)).map((c) => c.id)).toEqual([oldTop.id]);
+
+    await closet.restore(minji, oldTop.id);
+    expect((await closet.clothes(minji)).map((c) => c.id)).toContain(oldTop.id);
+    expect(await closet.tidiedClothes(minji)).toEqual([]);
+  });
+
+  test("someone else's piece cannot be tidied", async () => {
+    const { closet, createUser, minji, oldTop } = await minjiWithTwoTops();
+    const jun = await createUser("jun@gmail.com");
+
+    await expect(closet.tidy(jun, oldTop.id)).rejects.toThrow();
+    expect((await closet.clothes(minji)).map((c) => c.id)).toContain(oldTop.id);
+  });
+
+  test("a tidied piece is in neither a new 추천 nor a revised one", async () => {
+    const { closet, recommender, llm, minji, oldTop, otherTop, recommend } = await minjiWithTwoTops();
+    expect(await recommend()).toMatchObject({ outfit: { top: { id: oldTop.id } } });
+
+    await closet.tidy(minji, oldTop.id);
+    const first = await recommend();
+    expect(first).toMatchObject({ outfit: { top: { id: otherTop.id } } });
+    llm.interpret("이 티 말고", [{ type: "exclude", clothingId: otherTop.id }]);
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "이 티 말고" });
+
+    expect(revised.status === "ok" && revised.outfit.top?.id).not.toBe(oldTop.id);
+  });
+
+  test("a past 착용 기록 still shows a piece tidied since", async () => {
+    const { closet, recommender, minji, oldTop, jeans, sneakers, recommend } = await minjiWithTwoTops();
+    await recommender.accept({ userId: minji, date: DAY, clothingIds: [oldTop.id, jeans.id, sneakers.id] });
+
+    await closet.tidy(minji, oldTop.id);
+
+    expect((await recommend()).accepted?.clothes.map((c) => c.id)).toEqual([oldTop.id, jeans.id, sneakers.id]);
+  });
+});

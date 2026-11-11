@@ -105,6 +105,8 @@ type Tables = {
     material: Generated<Material>;
     photo_key: string | null;
     estimated_wear_frequency: EstimatedWearFrequency | null;
+    // When the piece was 정리; null while it is in the 옷장.
+    tidied_at: Date | null;
     created_at: Generated<Date>;
     // Counts up as clothes are added, so it orders them even when several
     // share a created_at.
@@ -119,6 +121,35 @@ type Tables = {
 
 export function createWardrobe({ dialect }: { dialect: Dialect }) {
   const db = new Kysely<Tables>({ dialect });
+
+  async function select(userId: string, which: "in-wardrobe" | "tidied" | "all"): Promise<Clothing[]> {
+    let query = db
+      .selectFrom("clothing")
+      .select([
+        "id",
+        "name",
+        "slot",
+        "color",
+        "seasons",
+        "style",
+        "formality",
+        "warmth",
+        "material",
+        "photo_key",
+        "estimated_wear_frequency",
+      ])
+      .where("user_id", "=", userId);
+    if (which === "in-wardrobe") query = query.where("tidied_at", "is", null);
+    if (which === "tidied") query = query.where("tidied_at", "is not", null);
+    // In the order they were added, so that ties in the score go to the
+    // same clothes every time.
+    const rows = await query.orderBy("seq").execute();
+    return rows.map(({ photo_key, estimated_wear_frequency, ...clothing }) => ({
+      ...clothing,
+      hasPhoto: photo_key !== null,
+      estimatedWearFrequency: estimated_wear_frequency,
+    }));
+  }
 
   return {
     async migrate() {
@@ -149,6 +180,7 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
       // Added with 옷 등록; clothes from before it have neither.
       await sql`alter table clothing add column if not exists photo_key text`.execute(db);
       await sql`alter table clothing add column if not exists estimated_wear_frequency text`.execute(db);
+      await sql`alter table clothing add column if not exists tidied_at timestamptz`.execute(db);
       await db.schema
         .createTable("clothing_preference")
         .ifNotExists()
@@ -219,20 +251,24 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
       return row?.photo_key ?? null;
     },
 
-    async clothes(userId: string): Promise<Clothing[]> {
-      const rows = await db
-        .selectFrom("clothing")
-        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth", "material", "photo_key", "estimated_wear_frequency"])
+    // The 옷장: the user's clothes not 정리.
+    clothes: (userId: string) => select(userId, "in-wardrobe"),
+
+    // 정리한 옷.
+    tidiedClothes: (userId: string) => select(userId, "tidied"),
+
+    // Both, for showing what was worn or recommended before some were 정리.
+    clothesIncludingTidied: (userId: string) => select(userId, "all"),
+
+    // 정리하기 (`tidied` true) or 되돌리기. False if it is not the user's.
+    async setTidied(userId: string, clothingId: string, tidied: boolean): Promise<boolean> {
+      const result = await db
+        .updateTable("clothing")
+        .set({ tidied_at: tidied ? new Date() : null })
         .where("user_id", "=", userId)
-        // In the order they were added, so that ties in the score go to the
-        // same clothes every time.
-        .orderBy("seq")
-        .execute();
-      return rows.map(({ photo_key, estimated_wear_frequency, ...clothing }) => ({
-        ...clothing,
-        hasPhoto: photo_key !== null,
-        estimatedWearFrequency: estimated_wear_frequency,
-      }));
+        .where("id", "=", clothingId)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows) > 0;
     },
 
     async setPreferences(userId: string, { colors, styles }: Preferences) {

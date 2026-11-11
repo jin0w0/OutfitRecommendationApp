@@ -15,6 +15,7 @@ import {
 } from "@/lib/outfit/clothing-names";
 import { getCloset } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../clothing-photo";
+import { tidyClothing } from "../actions";
 
 export default function ClothingDetail({ params }: PageProps<"/wardrobe/[id]">) {
   return (
@@ -67,6 +68,18 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/[id]">, "params">) {
           </div>
         ))}
       </dl>
+      <details className="text-sm">
+        <summary className="cursor-pointer text-zinc-600 dark:text-zinc-400">정리하기</summary>
+        <div className="mt-2 flex flex-col gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <p>이 옷을 옷장에서 정리할까요? 추천에는 더 나오지 않지만, 지난 착용 기록에는 남고 언제든 되돌릴 수 있어요.</p>
+          <form action={tidyClothing}>
+            <input type="hidden" name="clothingId" value={clothing.id} />
+            <button type="submit" className="rounded-full bg-foreground px-4 py-1.5 text-background">
+              정리하기
+            </button>
+          </form>
+        </div>
+      </details>
     </>
   );
 }

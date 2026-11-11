@@ -17,9 +17,14 @@ export default function Wardrobe() {
           메인으로
         </Link>
       </div>
-      <Link href="/wardrobe/new" className="self-start rounded-full bg-foreground px-5 py-2 text-background">
-        옷 등록하기
-      </Link>
+      <div className="flex items-center gap-4">
+        <Link href="/wardrobe/new" className="rounded-full bg-foreground px-5 py-2 text-background">
+          옷 등록하기
+        </Link>
+        <Link href="/wardrobe/tidied" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+          정리한 옷 보기
+        </Link>
+      </div>
       <Suspense fallback={<div className="h-40" />}>
         <Clothes />
       </Suspense>
