@@ -31,6 +31,13 @@ export function getAccount(): Account {
       const { getOutfitRecommender } = await import("@/lib/outfit/server");
       await getOutfitRecommender().forgetCalendar(userId);
     },
+    // A storage outage must not stop 탈퇴, as with Google revocation.
+    onAccountDeleted: async (userId) => {
+      const { getCloset } = await import("@/lib/outfit/server");
+      await getCloset()
+        .removeAllPhotos(userId)
+        .catch((error) => console.error("Could not remove the user's clothing photos", error));
+    },
     // Lets server actions set and clear the session cookie.
     plugins: [nextCookies()],
   });

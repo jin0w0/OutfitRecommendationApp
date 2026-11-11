@@ -163,3 +163,19 @@ describe("사진 보기", () => {
     expect(await closet.photoURL(minji, seeded.id)).toBeNull();
   });
 });
+
+describe("탈퇴", () => {
+  test("removing a user's photos removes every one of theirs, registered or not, and no one else's", async () => {
+    const { closet, vision, photos, createUser, minji, photoId } = await minjiWithAnalysedKnit();
+    await closet.register(minji, { photoId, clothing: NAVY_KNIT, estimatedWearFrequency: "weekly" });
+    vision.willSee({ clothing: NAVY_KNIT });
+    await closet.analyzePhoto(minji, photo());
+    const jun = await createUser("jun@gmail.com");
+    vision.willSee({ clothing: NAVY_KNIT });
+    await closet.analyzePhoto(jun, photo());
+
+    await closet.removeAllPhotos(minji);
+
+    expect(photos.keys()).toEqual([expect.stringContaining(`users/${jun}/`)]);
+  });
+});

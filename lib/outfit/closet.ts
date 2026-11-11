@@ -104,6 +104,12 @@ export function createCloset({
       const key = await wardrobe.photoKey(userId, clothingId);
       return key && photos.readURL(key, PHOTO_URL_SECONDS);
     },
+
+    // 탈퇴: every photo the user ever uploaded, registered or only analysed.
+    // Their rows go with the user; the photos are not in the database.
+    async removeAllPhotos(userId: string) {
+      await photos.removeAll(userPrefix(userId));
+    },
   };
 }
 
