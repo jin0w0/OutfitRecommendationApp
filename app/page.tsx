@@ -25,13 +25,20 @@ async function SignIn({ searchParams }: Pick<PageProps<"/">, "searchParams">) {
   return (
     <div className="flex flex-col items-start gap-3">
       <SignInButton callbackURL={safeReturnPath(next)} />
-      {error && (
+      {signInFailed(error) && (
         <p role="alert" className="text-sm text-red-600">
           로그인하지 못했어요. 다시 시도해 주세요.
         </p>
       )}
     </div>
   );
+}
+
+// Better Auth sends sign-in errors back as `error`. "access_denied" means the
+// user cancelled on Google's consent screen, which is not a failure.
+function signInFailed(error: string | string[] | undefined) {
+  const codes = typeof error === "string" ? [error] : (error ?? []);
+  return codes.some((code) => code !== "access_denied");
 }
 
 // Only same-site paths, so the sign-in link can't bounce users elsewhere.

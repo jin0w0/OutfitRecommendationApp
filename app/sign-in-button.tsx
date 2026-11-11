@@ -10,7 +10,7 @@ export function SignInButton({ callbackURL }: { callbackURL: string }) {
         authClient.signIn.social({
           provider: "google",
           callbackURL,
-          errorCallbackURL: "/?error=sign-in",
+          errorCallbackURL: "/",
         })
       }
       className="flex h-12 items-center justify-center rounded-full bg-foreground px-6 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
