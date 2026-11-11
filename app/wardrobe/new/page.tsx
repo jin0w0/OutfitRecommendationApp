@@ -14,7 +14,8 @@ export default function RegisterClothing() {
         </a>
       </div>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        옷 한 벌이 잘 보이게 찍은 사진 한 장을 골라 주세요. AI가 채운 내용은 저장하기 전에 확인하고 고칠 수 있어요.
+        사진 한 장에 옷 한 벌이 잘 보이게 찍어 주세요. 여러 장(최대 10장)을 고르면 한 장씩 차례로 확인해요. AI가
+        채운 내용은 저장하기 전에 고칠 수 있어요.
       </p>
       <Suspense fallback={<div className="h-40" />}>
         <SignedIn>

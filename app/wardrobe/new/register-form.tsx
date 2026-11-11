@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { AnalysedPhoto, Draft } from "@/lib/outfit/closet";
 import {
@@ -29,23 +30,42 @@ const SLOT_NAMES = { top: "상의", bottom: "하의", dress: "원피스", outer:
 
 // Photos are shrunk in the browser before upload: smaller to send, cheaper to analyse.
 const MAX_SIDE = 1600;
+// How many photos can be picked together.
+const MAX_PHOTOS = 10;
 
 type Stage =
   | { name: "pick" }
   | { name: "analysing"; preview: string }
   | { name: "confirm"; preview: string; analysed: AnalysedPhoto };
 
+// The photos picked together are gone through one at a time: each is
+// analysed when its turn comes, confirmed or skipped, then the next.
 export function RegisterForm() {
+  const router = useRouter();
+  const [queue, setQueue] = useState<File[]>([]);
+  const [position, setPosition] = useState(0);
   const [stage, setStage] = useState<Stage>({ name: "pick" });
   const [error, setError] = useState<string | null>(null);
 
-  async function pick(file: File) {
+  async function start(files: File[]) {
+    setQueue(files);
+    setPosition(0);
+    await analyse(files, 0);
+  }
+
+  async function analyse(files: File[], index: number) {
+    if (index >= files.length) {
+      router.push("/wardrobe");
+      return;
+    }
+    setPosition(index);
     setError(null);
     let photo: Blob;
     try {
-      photo = await shrink(file);
+      photo = await shrink(files[index]);
     } catch {
       setError("이 사진은 열 수 없어요. JPEG나 PNG로 된 사진을 골라 주세요.");
+      setStage({ name: "pick" });
       return;
     }
     const preview = URL.createObjectURL(photo);
@@ -61,6 +81,18 @@ export function RegisterForm() {
     setStage({ name: "confirm", preview, analysed: result.analysed });
   }
 
+  const next = () => void analyse(queue, position + 1);
+  const progress = queue.length > 1 && (
+    <div className="flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-400">
+      <span>
+        {position + 1} / {queue.length}
+      </span>
+      <button type="button" onClick={next} className="underline">
+        이 사진 건너뛰기
+      </button>
+    </div>
+  );
+
   if (stage.name === "pick") {
     return (
       <div className="flex flex-col gap-3">
@@ -69,10 +101,11 @@ export function RegisterForm() {
           <input
             type="file"
             accept="image/*"
+            multiple
             className="sr-only"
             onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void pick(file);
+              const files = [...(event.target.files ?? [])].slice(0, MAX_PHOTOS);
+              if (files.length) void start(files);
             }}
           />
         </label>
@@ -81,24 +114,30 @@ export function RegisterForm() {
             {error}
           </p>
         )}
+        {error && position + 1 < queue.length && (
+          <button type="button" onClick={next} className="self-start text-sm underline">
+            다음 사진으로
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
+      {progress}
       {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL */}
       <img src={stage.preview} alt="올린 옷 사진" className="max-h-72 self-start rounded-lg" />
       {stage.name === "analysing" ? (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">AI가 사진을 보고 있어요…</p>
       ) : (
-        <ConfirmForm key={stage.analysed.photoId} analysed={stage.analysed} />
+        <ConfirmForm key={stage.analysed.photoId} analysed={stage.analysed} onSaved={next} />
       )}
     </div>
   );
 }
 
-function ConfirmForm({ analysed }: { analysed: AnalysedPhoto }) {
+function ConfirmForm({ analysed, onSaved }: { analysed: AnalysedPhoto; onSaved: () => void }) {
   const [draft, setDraft] = useState<Draft>(analysed.draft);
   const [frequency, setFrequency] = useState<EstimatedWearFrequency | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -120,7 +159,8 @@ function ConfirmForm({ analysed }: { analysed: AnalysedPhoto }) {
         clothing: draft as ClothingFields,
         estimatedWearFrequency: frequency,
       });
-      if (result && !result.ok) setMessage(result.message);
+      if (result.ok) onSaved();
+      else setMessage(result.message);
     });
   }
 

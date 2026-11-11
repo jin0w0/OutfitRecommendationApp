@@ -33,9 +33,9 @@ export async function analyseClothingPhoto(formData: FormData): Promise<AnalyseR
   }
 }
 
-export type RegisterResult = { ok: false; message: string };
+export type RegisterResult = { ok: true } | { ok: false; message: string };
 
-// 등록하기, then on to the 옷장.
+// 등록하기. The page moves on to the next photo, or to the 옷장 after the last.
 export async function registerClothing(request: {
   photoId: string;
   clothing: ClothingFields;
@@ -48,5 +48,5 @@ export async function registerClothing(request: {
     console.error(error);
     return { ok: false, message: "모든 항목을 골라 주세요." };
   }
-  redirect("/wardrobe");
+  return { ok: true };
 }
