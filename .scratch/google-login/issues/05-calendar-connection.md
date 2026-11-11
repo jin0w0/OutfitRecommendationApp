@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 로그인 계정 A, 연동 계정 B일 때 캘린더 접근 토큰은 B의 것이다
 - [x] 캘린더 연동한 계정 B로 로그인하면 A가 아닌 다른 사용자가 된다

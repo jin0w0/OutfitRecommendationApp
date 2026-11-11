@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 로그인 시 요청 권한은 openid, email, profile뿐이다
 - [x] 같은 구글 계정으로 다시 로그인하면 같은 사용자다

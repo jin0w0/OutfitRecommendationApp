@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 해제하면 연동 계정의 토큰 철회가 호출된다
 - [x] 철회가 실패해도 해제가 완료된다

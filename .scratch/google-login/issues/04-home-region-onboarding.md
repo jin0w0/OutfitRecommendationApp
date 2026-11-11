@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 현재 사용자 조회가 기본 지역과 온보딩 상태를 돌려준다
 - [x] 기본 지역이 없는 사용자가 보호된 화면에 들어가면 온보딩으로 간다

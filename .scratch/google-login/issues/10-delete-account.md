@@ -4,7 +4,7 @@
 
 **Blocked by:** 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 탈퇴 시 두 계정 모두 철회가 시도된다
 - [x] 탈퇴 뒤 그 사용자의 세션, 계정 연결, 캘린더 연동, 기본 지역이 남지 않는다

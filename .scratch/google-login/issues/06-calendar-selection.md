@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 연동 완료 처리 뒤 기본 캘린더만 선택되어 있다
 - [x] 선택은 연동 계정에 실제로 있는 캘린더로만 바꿀 수 있다

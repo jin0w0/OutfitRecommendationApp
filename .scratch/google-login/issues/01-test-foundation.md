@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `npm test`가 한 번 실행으로 모든 테스트를 돌리고 종료한다
 - [x] 테스트가 Docker나 외부 DB 없이 Postgres 호환 DB를 쓴다

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 권유를 보거나 건너뛴 사실이 저장되고 다시 띄우지 않는다
 - [x] 권유에서 연동을 마치면 메인 화면으로 간다

@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 실행 뒤 그 사용자의 어떤 세션으로도 현재 사용자 조회가 "없음"이다
 - [x] 다른 사용자의 세션은 영향받지 않는다
