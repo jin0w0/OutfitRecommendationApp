@@ -89,7 +89,7 @@ export type Registration = {
   estimatedWearFrequency?: EstimatedWearFrequency;
 };
 
-export type Preferences = { colors: string[]; styles: Style[] };
+export type Preferences = { colors: Color[]; styles: Style[] };
 
 type Tables = {
   clothing: {
@@ -112,7 +112,7 @@ type Tables = {
   };
   clothing_preference: {
     user_id: string;
-    colors: JSONColumnType<string[]>;
+    colors: JSONColumnType<Color[]>;
     styles: JSONColumnType<Style[]>;
   };
 };

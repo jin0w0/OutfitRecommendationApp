@@ -16,6 +16,7 @@ import {
   type Clothing,
   type ClothingFields,
   type EstimatedWearFrequency,
+  type Preferences,
   type Wardrobe,
 } from "./wardrobe";
 
@@ -103,6 +104,16 @@ export function createCloset({
     async photoURL(userId: string, clothingId: string): Promise<string | null> {
       const key = await wardrobe.photoKey(userId, clothingId);
       return key && photos.readURL(key, PHOTO_URL_SECONDS);
+    },
+
+    // 선호 색상·스타일 읽기·저장하기.
+    preferences: (userId: string) => wardrobe.preferences(userId),
+
+    async setPreferences(userId: string, { colors, styles }: Preferences) {
+      if (!colors.every((color) => COLORS.includes(color)) || !styles.every((style) => STYLES.includes(style))) {
+        throw new Error("Colors and styles must come from the lists");
+      }
+      await wardrobe.setPreferences(userId, { colors: [...new Set(colors)], styles: [...new Set(styles)] });
     },
 
     // 탈퇴: every photo the user ever uploaded, registered or only analysed.

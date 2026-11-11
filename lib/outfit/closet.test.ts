@@ -185,3 +185,36 @@ describe("탈퇴", () => {
     expect(photos.keys()).toEqual([expect.stringContaining(`users/${jun}/`)]);
   });
 });
+
+describe("선호 색상·스타일", () => {
+  test("saved preferences are read back and steer the next 추천", async () => {
+    const { closet, recommender, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, redTop] = await addClothes(minji, [
+      { name: "검정 티", slot: "top", color: "black" },
+      { name: "빨간 티", slot: "top", color: "red" },
+      { name: "청바지", slot: "bottom", color: "navy" },
+      { name: "운동화", slot: "shoes", color: "white" },
+    ]);
+
+    await closet.setPreferences(minji, { colors: ["red"], styles: ["street"] });
+
+    expect(await closet.preferences(minji)).toEqual({ colors: ["red"], styles: ["street"] });
+    const recommendation = await recommender.recommendForDate({
+      userId: minji,
+      date: "2026-11-12",
+      situation: null,
+      location: { latitude: 37.5665, longitude: 126.978 },
+    });
+    expect(recommendation).toMatchObject({ outfit: { top: { id: redTop.id } } });
+  });
+
+  test("colors and styles outside the lists are refused", async () => {
+    const { closet, createUser } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+
+    await expect(closet.setPreferences(minji, { colors: ["teal" as never], styles: [] })).rejects.toThrow();
+    await expect(closet.setPreferences(minji, { colors: [], styles: ["gothic" as never] })).rejects.toThrow();
+    expect(await closet.preferences(minji)).toEqual({ colors: [], styles: [] });
+  });
+});

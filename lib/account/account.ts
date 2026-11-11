@@ -35,6 +35,9 @@ export type CurrentUser = {
   calendarConnection: CalendarConnectionSummary | null;
   // Onboarding's one-time 캘린더 연동 권유 is still pending.
   shouldInviteCalendar: boolean;
+  // Onboarding's one-time 선호 색상·스타일 step is still pending. It comes
+  // before the 캘린더 연동 권유, so users already past that are not asked.
+  shouldAskPreferences: boolean;
 };
 
 export function createAccount(config: AccountConfig) {
@@ -56,6 +59,12 @@ export function createAccount(config: AccountConfig) {
         // Set only through setHomeRegion, never from client input.
         homeRegion: { type: "string", required: false, input: false },
         calendarInviteSeen: {
+          type: "boolean",
+          required: false,
+          defaultValue: false,
+          input: false,
+        },
+        preferencesStepPassed: {
           type: "boolean",
           required: false,
           defaultValue: false,
@@ -125,6 +134,8 @@ export function createAccount(config: AccountConfig) {
         calendarConnection,
         shouldInviteCalendar:
           homeRegion !== null && !session.user.calendarInviteSeen && calendarConnection === null,
+        shouldAskPreferences:
+          homeRegion !== null && !session.user.preferencesStepPassed && !session.user.calendarInviteSeen,
       };
     },
 
@@ -147,6 +158,13 @@ export function createAccount(config: AccountConfig) {
     async dismissCalendarInvite(headers: Headers) {
       const { user } = await requireSession(headers);
       await markCalendarInviteSeen(user.id);
+    },
+
+    // The 선호 단계 was saved or skipped.
+    async passPreferencesStep(headers: Headers) {
+      const { user } = await requireSession(headers);
+      const context = await auth.$context;
+      await context.internalAdapter.updateUser(user.id, { preferencesStepPassed: true });
     },
 
     async completeCalendarConnection(headers: Headers, callbackParams: URLSearchParams) {

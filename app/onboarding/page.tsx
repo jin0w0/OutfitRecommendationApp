@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import { skipCalendarInvite } from "../actions";
+import { PreferencesForm } from "../preferences-form";
 import { RegionForm } from "../region-form";
 
 export default function Onboarding() {
@@ -15,14 +16,29 @@ export default function Onboarding() {
   );
 }
 
-// 기본 지역 first, then the one-time 캘린더 연동 권유, then the main screen.
+// 기본 지역 first, then the one-time 선호 단계 and 캘린더 연동 권유, then the main screen.
 async function OnboardingStep() {
   const requestHeaders = await headers();
   const user = await getAccount().getCurrentUser(requestHeaders);
   if (!user) redirect("/?next=/onboarding");
   if (user.needsOnboarding) return <HomeRegionStep />;
+  if (user.shouldAskPreferences) return <PreferencesStep />;
   if (user.shouldInviteCalendar) return <CalendarInviteStep />;
   redirect("/home");
+}
+
+function PreferencesStep() {
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold">어떤 색과 스타일을 좋아하세요?</h1>
+        <p className="text-zinc-600 dark:text-zinc-400">
+          고른 색과 스타일이 들어간 코디를 더 추천해 드려요. 나중에 설정에서 바꿀 수 있어요.
+        </p>
+      </div>
+      <PreferencesForm current={{ colors: [], styles: [] }} next="/onboarding" />
+    </>
+  );
 }
 
 function HomeRegionStep() {

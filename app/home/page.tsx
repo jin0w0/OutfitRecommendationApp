@@ -24,7 +24,7 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   const requestHeaders = await headers();
   const user = await getAccount().getCurrentUser(requestHeaders);
   if (!user) redirect("/?next=/home");
-  if (user.needsOnboarding || user.shouldInviteCalendar) redirect("/onboarding");
+  if (user.needsOnboarding || user.shouldAskPreferences || user.shouldInviteCalendar) redirect("/onboarding");
 
   const params = await searchParams;
   const date = homeDate(params.date);

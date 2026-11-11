@@ -2,7 +2,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
+import { getCloset } from "@/lib/outfit/server";
 import { signOutEverywhere } from "../actions";
+import { PreferencesForm } from "../preferences-form";
 import { RegionForm } from "../region-form";
 import { CalendarSection } from "./calendar-section";
 import { DeleteAccountSection } from "./delete-account";
@@ -32,6 +34,10 @@ async function SettingsSections({ searchParams }: Pick<PageProps<"/settings">, "
           장소가 없는 일정은 이 지역의 날씨로 추천해요.
         </p>
         <RegionForm current={user.homeRegion} next="/settings" submitLabel="저장" />
+      </section>
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium">선호 색상·스타일</h2>
+        <PreferencesForm current={await getCloset().preferences(user.id)} next="/settings" />
       </section>
       <CalendarSection
         connection={user.calendarConnection}

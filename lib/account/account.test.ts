@@ -212,3 +212,39 @@ describe("deleting the account", () => {
     expect(google.isAppAuthorized("minji@gmail.com")).toBe(true);
   });
 });
+
+describe("선호 단계 during onboarding", () => {
+  async function minji() {
+    const harness = await createTestAccount();
+    harness.google.addAccount({ email: "minji@gmail.com", name: "김민지" });
+    const { headers } = await harness.signInWithGoogle("minji@gmail.com");
+    return { ...harness, headers };
+  }
+
+  test("the 선호 단계 comes after the home region, not before", async () => {
+    const { account, headers } = await minji();
+    expect((await account.getCurrentUser(headers))?.shouldAskPreferences).toBe(false);
+
+    await account.setHomeRegion(headers, "seoul");
+
+    expect((await account.getCurrentUser(headers))?.shouldAskPreferences).toBe(true);
+  });
+
+  test("once passed, the 선호 단계 is not shown again", async () => {
+    const { account, headers } = await minji();
+    await account.setHomeRegion(headers, "seoul");
+
+    await account.passPreferencesStep(headers);
+
+    expect((await account.getCurrentUser(headers))?.shouldAskPreferences).toBe(false);
+  });
+
+  test("users who already got past the calendar invite are not asked", async () => {
+    const { account, headers } = await minji();
+    await account.setHomeRegion(headers, "seoul");
+
+    await account.dismissCalendarInvite(headers);
+
+    expect((await account.getCurrentUser(headers))?.shouldAskPreferences).toBe(false);
+  });
+});
