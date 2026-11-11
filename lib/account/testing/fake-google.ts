@@ -32,6 +32,7 @@ export class FakeGoogle {
   private accessTokens = new Map<string, Grant>();
   private counter = 0;
   private revocationsFail = false;
+  private down = new Set<string>();
 
   addAccount(profile: GoogleProfile) {
     const account = {
@@ -75,6 +76,15 @@ export class FakeGoogle {
     this.revocationsFail = true;
   }
 
+  // Google has an outage on one endpoint: it answers 503 from now on.
+  failTokenEndpoint() {
+    this.down.add(TOKEN_ENDPOINT);
+  }
+
+  failCalendarList() {
+    this.down.add(CALENDAR_LIST_ENDPOINT);
+  }
+
   // Which Google account an access token was issued for, or null if unknown.
   ownerOfAccessToken(accessToken: string) {
     return this.accessTokens.get(accessToken)?.account.email ?? null;
@@ -82,6 +92,7 @@ export class FakeGoogle {
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
+    if (this.down.has(request.url)) return new Response("unavailable", { status: 503 });
     if (request.url === TOKEN_ENDPOINT) return this.token(request);
     if (request.url === CALENDAR_LIST_ENDPOINT) return this.calendarList(request);
     if (request.url === REVOKE_ENDPOINT) return this.revoke(request);

@@ -376,3 +376,46 @@ describe("disconnecting", () => {
     expect(await account.getSelectedCalendarIds(userId)).toEqual(["club@gmail.com"]);
   });
 });
+
+describe("connection failing halfway", () => {
+  async function startConnecting() {
+    const harness = await minjiWithSchoolAccount();
+    const authorizationURL = await harness.account.startCalendarConnection(harness.headers, "/settings");
+    const code = harness.google.approve(authorizationURL, "minji@kangnam.ac.kr");
+    const state = new URL(authorizationURL).searchParams.get("state")!;
+    const finish = () =>
+      harness.account.completeCalendarConnection(harness.headers, new URLSearchParams({ code, state }));
+    return { ...harness, finish };
+  }
+
+  test("when Google cannot exchange the code, the connection fails without an error page", async () => {
+    const { account, google, headers, finish } = await startConnecting();
+    google.failTokenEndpoint();
+
+    expect(await finish()).toEqual({ status: "failed", returnTo: "/settings" });
+    expect((await account.getCurrentUser(headers))?.calendarConnection).toBeNull();
+  });
+
+  test("when the calendar list cannot be read, no half-made connection is left", async () => {
+    const { account, google, headers, finish } = await startConnecting();
+    google.failCalendarList();
+
+    expect(await finish()).toEqual({ status: "failed", returnTo: "/settings" });
+    expect((await account.getCurrentUser(headers))?.calendarConnection).toBeNull();
+  });
+
+  test("a failed switch to another account keeps the current connection", async () => {
+    const { account, google, headers, connectCalendar } = await minjiWithSchoolAccount();
+    await connectCalendar(headers, "minji@kangnam.ac.kr");
+    google.addAccount({ email: "club@gmail.com", name: "동아리" });
+    google.failCalendarList();
+
+    const result = await connectCalendar(headers, "club@gmail.com");
+
+    expect(result.status).toBe("failed");
+    expect((await account.getCurrentUser(headers))?.calendarConnection?.email).toBe(
+      "minji@kangnam.ac.kr",
+    );
+    expect(google.isAppAuthorized("minji@kangnam.ac.kr")).toBe(true);
+  });
+});

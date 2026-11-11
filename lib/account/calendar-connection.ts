@@ -2,7 +2,7 @@
 // account never becomes a way to sign in (ADR-0002).
 import { createHash, randomBytes } from "node:crypto";
 import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type Transaction } from "kysely";
 import {
   CALENDAR_SCOPE,
   calendarAuthorizationURL,
@@ -151,40 +151,43 @@ export function createCalendarConnections({
       const code = params.get("code");
       if (!code) return { status: "failed", returnTo };
 
-      const tokens = await exchangeCode(google, { code, codeVerifier: request.code_verifier });
-      if (!tokens?.idToken || !tokens.refreshToken || !tokens.scope.includes(CALENDAR_SCOPE)) {
-        return { status: "failed", returnTo };
-      }
-
-      const { googleId, email } = identityFromIdToken(tokens.idToken);
+      // Everything Google has to answer comes first, so a Google failure
+      // leaves nothing half-saved and the current connection untouched.
       const previous = await db
         .selectFrom("calendar_connection")
         .selectAll()
         .where("user_id", "=", userId)
         .executeTakeFirst();
+      let fetched;
+      try {
+        fetched = await fetchNewConnection(code, request.code_verifier, previous?.google_id);
+      } catch (error) {
+        console.error("Could not complete the calendar connection", error);
+        return { status: "failed", returnTo };
+      }
+      if (!fetched) return { status: "failed", returnTo };
+      const { accessToken, refreshToken, expiresAt, googleId, email, primaryCalendarIds } = fetched;
+
       const values = {
         google_id: googleId,
         email,
-        access_token: await encrypt(tokens.accessToken),
-        refresh_token: await encrypt(tokens.refreshToken),
-        access_token_expires_at: tokens.expiresAt,
+        access_token: await encrypt(accessToken),
+        refresh_token: await encrypt(refreshToken),
+        access_token_expires_at: expiresAt,
         status: "connected" as const,
         updated_at: new Date(),
       };
-      await db
-        .insertInto("calendar_connection")
-        .values({ user_id: userId, ...values })
-        .onConflict((oc) => oc.column("user_id").doUpdateSet(values))
-        .execute();
-
-      // A newly picked Google account starts with just its primary calendar,
-      // and the one it replaces is let go as if it were disconnected.
-      if (previous?.google_id !== googleId) {
-        if (previous) await release(previous);
-        const calendars = (await listGoogleCalendars(tokens.accessToken)) ?? [];
-        const primary = calendars.filter((c) => c.primary);
-        await replaceSelection(userId, primary.map((c) => c.id));
-      }
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .insertInto("calendar_connection")
+          .values({ user_id: userId, ...values })
+          .onConflict((oc) => oc.column("user_id").doUpdateSet(values))
+          .execute();
+        // A newly picked Google account starts with just its primary calendar.
+        if (primaryCalendarIds) await writeSelection(trx, userId, primaryCalendarIds);
+      });
+      // The account it replaces is let go as if it were disconnected.
+      if (previous && previous.google_id !== googleId) await release(previous);
       return { status: "connected", returnTo };
     },
 
@@ -290,14 +293,33 @@ export function createCalendarConnections({
   }
 
   async function replaceSelection(userId: string, calendarIds: string[]) {
-    await db.transaction().execute(async (trx) => {
-      await trx.deleteFrom("calendar_selection").where("user_id", "=", userId).execute();
-      if (calendarIds.length === 0) return;
-      await trx
-        .insertInto("calendar_selection")
-        .values(calendarIds.map((calendar_id) => ({ user_id: userId, calendar_id })))
-        .execute();
-    });
+    await db.transaction().execute((trx) => writeSelection(trx, userId, calendarIds));
+  }
+
+  async function writeSelection(trx: Transaction<Tables>, userId: string, calendarIds: string[]) {
+    await trx.deleteFrom("calendar_selection").where("user_id", "=", userId).execute();
+    if (calendarIds.length === 0) return;
+    await trx
+      .insertInto("calendar_selection")
+      .values(calendarIds.map((calendar_id) => ({ user_id: userId, calendar_id })))
+      .execute();
+  }
+
+  // Asks Google for everything a new connection needs: the tokens, which
+  // account was picked, and (for an account other than `currentGoogleId`) its
+  // primary calendars. null when Google refuses; throws when it fails.
+  async function fetchNewConnection(code: string, codeVerifier: string, currentGoogleId?: string) {
+    const tokens = await exchangeCode(google, { code, codeVerifier });
+    if (!tokens?.idToken || !tokens.refreshToken || !tokens.scope.includes(CALENDAR_SCOPE)) {
+      return null;
+    }
+    const { accessToken, refreshToken, expiresAt } = tokens;
+    const connection = { accessToken, refreshToken, expiresAt, ...identityFromIdToken(tokens.idToken) };
+    // The same account again keeps the calendars the user chose.
+    if (connection.googleId === currentGoogleId) return { ...connection, primaryCalendarIds: null };
+    const calendars = await listGoogleCalendars(accessToken);
+    if (!calendars) return null;
+    return { ...connection, primaryCalendarIds: calendars.filter((c) => c.primary).map((c) => c.id) };
   }
 
   async function accessToken(userId: string): Promise<CalendarAccessToken> {
