@@ -100,7 +100,13 @@ describe("옷 등록: 확인하고 저장", () => {
     });
 
     expect(await closet.clothes(minji)).toEqual([
-      { id: knit.id, ...NAVY_KNIT, name: "엄마가 사 준 니트", seasons: ["autumn", "winter"], hasPhoto: true },
+      {
+        id: knit.id,
+        ...NAVY_KNIT,
+        name: "엄마가 사 준 니트",
+        hasPhoto: true,
+        estimatedWearFrequency: "rarely",
+      },
     ]);
   });
 

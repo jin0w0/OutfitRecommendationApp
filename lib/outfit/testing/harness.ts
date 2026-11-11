@@ -13,7 +13,7 @@ import {
   type Weather,
   type WeatherSource,
 } from "../recommender";
-import { createWardrobe, type NewClothing } from "../wardrobe";
+import { createWardrobe, type EstimatedWearFrequency, type NewClothing } from "../wardrobe";
 import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
@@ -67,10 +67,15 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     await account.deleteAccount(signedIn.get(userId)!);
   }
 
-  // Adds clothes to a user's 옷장, filling in unremarkable defaults.
-  async function addClothes(userId: string, clothes: (Partial<NewClothing> & Pick<NewClothing, "name" | "slot">)[]) {
+  // Adds clothes to a user's 옷장, filling in unremarkable defaults, with an
+  // 추정 착용 빈도 when given.
+  async function addClothes(
+    userId: string,
+    clothes: (Partial<NewClothing> &
+      Pick<NewClothing, "name" | "slot"> & { estimatedWearFrequency?: EstimatedWearFrequency })[],
+  ) {
     const added = [];
-    for (const clothing of clothes) {
+    for (const { estimatedWearFrequency, ...clothing } of clothes) {
       added.push(
         await wardrobe.addClothing(userId, {
           color: "black",
@@ -80,7 +85,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
           warmth: 2,
           material: "cotton",
           ...clothing,
-        }),
+        }, estimatedWearFrequency && { estimatedWearFrequency }),
       );
     }
     return added;

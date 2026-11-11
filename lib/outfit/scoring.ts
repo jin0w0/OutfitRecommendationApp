@@ -47,9 +47,11 @@ export type Evidence =
   // The user's preferred colors and styles that the pieces match.
   | { factor: "preference"; clothes: Clothing[]; facts: { colors: string[]; styles: Style[] } }
   // The pieces not worn in the last `days` days.
-  | { factor: "recency"; clothes: Clothing[]; facts: { days: number } }
+  // `estimated`: the pieces among them judged by the 추정 착용 빈도, not a
+  // 착용 기록, so no day count is claimed for them.
+  | { factor: "recency"; clothes: Clothing[]; facts: { days: number; estimated: string[] } }
   // The pieces not worn for at least `days` days, or never.
-  | { factor: "utilization"; clothes: Clothing[]; facts: { days: number } };
+  | { factor: "utilization"; clothes: Clothing[]; facts: { days: number; estimated: string[] } };
 
 // One 추천 이유: its 근거, and the 근거 as a sentence for the user.
 export type Reason = { evidence: Evidence; sentence: string };
@@ -96,8 +98,11 @@ export type ScoringFacts = {
   otherFormalities: Formality[];
   weather: Weather | null;
   preferences: Preferences;
-  // Per clothing id, days since its latest 착용 기록. Absent if never worn.
+  // Per clothing id, days since its latest 착용 기록, or as its 추정 착용
+  // 빈도 suggests when it has none. Absent if never worn.
   daysSinceWorn: Map<string, number>;
+  // The clothing ids whose daysSinceWorn comes from the 추정 착용 빈도.
+  estimated: Set<string>;
 };
 
 export function score(
@@ -155,7 +160,7 @@ export function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFact
 function partialEvidence(
   factor: Factor,
   outfit: Outfit,
-  { weather, daysSinceWorn }: ScoringFacts,
+  { weather, daysSinceWorn, estimated }: ScoringFacts,
 ): Evidence | null {
   const items = Object.values(outfit);
   const best = (value: (c: Clothing) => number) => {
@@ -172,11 +177,21 @@ function partialEvidence(
     case "recency":
     case "utilization": {
       const found = best(days);
-      return found && { factor, clothes: found.clothes, facts: { days: Math.floor(found.top) } };
+      return (
+        found && {
+          factor,
+          clothes: found.clothes,
+          facts: { days: Math.floor(found.top), estimated: estimatedAmong(found.clothes, estimated) },
+        }
+      );
     }
     default:
       return null;
   }
+}
+
+function estimatedAmong(clothes: Clothing[], estimated: Set<string>) {
+  return clothes.filter((c) => estimated.has(c.id)).map((c) => c.id);
 }
 
 // What made `factor` score well for the 코디, from the same facts the score
@@ -184,7 +199,7 @@ function partialEvidence(
 function evidenceFor(
   factor: Factor,
   outfit: Outfit,
-  { basis, basisTitle, otherFormalities, weather, preferences, daysSinceWorn }: ScoringFacts,
+  { basis, basisTitle, otherFormalities, weather, preferences, daysSinceWorn, estimated }: ScoringFacts,
 ): Evidence | null {
   const items = Object.values(outfit);
   const days = (c: Clothing) => daysSinceWorn.get(c.id) ?? Infinity;
@@ -229,14 +244,14 @@ function evidenceFor(
         },
       };
     }
-    case "recency":
-      return { factor, clothes: items.filter((c) => days(c) >= RECENT_DAYS), facts: { days: RECENT_DAYS } };
-    case "utilization":
-      return {
-        factor,
-        clothes: items.filter((c) => days(c) >= LONG_UNWORN_DAYS),
-        facts: { days: LONG_UNWORN_DAYS },
-      };
+    case "recency": {
+      const clothes = items.filter((c) => days(c) >= RECENT_DAYS);
+      return { factor, clothes, facts: { days: RECENT_DAYS, estimated: estimatedAmong(clothes, estimated) } };
+    }
+    case "utilization": {
+      const clothes = items.filter((c) => days(c) >= LONG_UNWORN_DAYS);
+      return { factor, clothes, facts: { days: LONG_UNWORN_DAYS, estimated: estimatedAmong(clothes, estimated) } };
+    }
   }
 }
 

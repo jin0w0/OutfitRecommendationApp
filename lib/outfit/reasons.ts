@@ -62,9 +62,24 @@ export function templateSentence(evidence: Evidence): string {
       return `좋아하는 ${liked.join(", ")}에 맞는 ${names}이(가) 들어 있어요.`;
     }
     case "recency":
-      return `${names}은(는) 최근 ${evidence.facts.days}일 동안 입지 않은 옷이에요.`;
-    case "utilization":
-      return `${names}은(는) ${evidence.facts.days}일 넘게 입지 않은 옷이라 이번에 꺼내 입기 좋아요.`;
+    case "utilization": {
+      // Only a 착용 기록 lets a day count be claimed; for the rest there is
+      // what the user said about how often they wear them.
+      const estimated = evidence.clothes.filter((c) => evidence.facts.estimated.includes(c.id));
+      const recorded = evidence.clothes.filter((c) => !evidence.facts.estimated.includes(c.id));
+      const parts = [];
+      if (recorded.length) {
+        parts.push(
+          evidence.factor === "recency"
+            ? `${list(recorded)}은(는) 최근 ${evidence.facts.days}일 동안 입지 않은 옷이에요.`
+            : `${list(recorded)}은(는) ${evidence.facts.days}일 넘게 입지 않은 옷이라 이번에 꺼내 입기 좋아요.`,
+        );
+      }
+      if (estimated.length) {
+        parts.push(`${list(estimated)}은(는) 평소 자주 입지 않는다고 하신 옷이라 이번에 꺼내 입기 좋아요.`);
+      }
+      return parts.join(" ");
+    }
   }
 }
 

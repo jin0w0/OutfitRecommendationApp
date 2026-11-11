@@ -77,14 +77,16 @@ export type ClothingFields = {
 export type Clothing = { id: string } & ClothingFields & {
   // Whether there is a photo to show (clothes from before 옷 등록 have none).
   hasPhoto: boolean;
+  // What the user said when registering it; null for clothes from before.
+  estimatedWearFrequency: EstimatedWearFrequency | null;
 };
 
 export type NewClothing = ClothingFields;
 
 // What 옷 등록 adds beyond the fields.
 export type Registration = {
-  photoKey: string;
-  estimatedWearFrequency: EstimatedWearFrequency;
+  photoKey?: string;
+  estimatedWearFrequency?: EstimatedWearFrequency;
 };
 
 export type Preferences = { colors: string[]; styles: Style[] };
@@ -171,7 +173,12 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
           estimated_wear_frequency: registration?.estimatedWearFrequency ?? null,
         })
         .execute();
-      return { id, ...clothing, hasPhoto: registration !== undefined };
+      return {
+        id,
+        ...clothing,
+        hasPhoto: registration?.photoKey !== undefined,
+        estimatedWearFrequency: registration?.estimatedWearFrequency ?? null,
+      };
     },
 
     // Where a piece's photo is kept, if it is the user's and has one.
@@ -188,13 +195,17 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
     async clothes(userId: string): Promise<Clothing[]> {
       const rows = await db
         .selectFrom("clothing")
-        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth", "material", "photo_key"])
+        .select(["id", "name", "slot", "color", "seasons", "style", "formality", "warmth", "material", "photo_key", "estimated_wear_frequency"])
         .where("user_id", "=", userId)
         // In the order they were added, so that ties in the score go to the
         // same clothes every time.
         .orderBy("seq")
         .execute();
-      return rows.map(({ photo_key, ...clothing }) => ({ ...clothing, hasPhoto: photo_key !== null }));
+      return rows.map(({ photo_key, estimated_wear_frequency, ...clothing }) => ({
+        ...clothing,
+        hasPhoto: photo_key !== null,
+        estimatedWearFrequency: estimated_wear_frequency,
+      }));
     },
 
     async setPreferences(userId: string, { colors, styles }: Preferences) {
