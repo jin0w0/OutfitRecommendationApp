@@ -229,3 +229,68 @@ describe("옷장 보기", () => {
     expect(await closet.clothing(jun, knit.id)).toBeNull();
   });
 });
+
+describe("고치기", () => {
+  async function minjiWithKnit() {
+    const outfit = await minjiWithAnalysedKnit();
+    const knit = await outfit.closet.register(outfit.minji, {
+      photoId: outfit.photoId,
+      clothing: NAVY_KNIT,
+      estimatedWearFrequency: "weekly",
+    });
+    return { ...outfit, knit };
+  }
+
+  test("every field and the 추정 착용 빈도 can be changed", async () => {
+    const { closet, minji, knit } = await minjiWithKnit();
+
+    await closet.update(minji, knit.id, {
+      clothing: { ...NAVY_KNIT, name: "회색 니트", color: "gray", seasons: ["winter"], warmth: 2 },
+      estimatedWearFrequency: "rarely",
+    });
+
+    expect(await closet.clothing(minji, knit.id)).toEqual({
+      ...knit,
+      name: "회색 니트",
+      color: "gray",
+      seasons: ["winter"],
+      warmth: 2,
+      estimatedWearFrequency: "rarely",
+    });
+  });
+
+  test("changes outside the lists, or to someone else's piece, are refused", async () => {
+    const { closet, createUser, minji, knit } = await minjiWithKnit();
+    const jun = await createUser("jun@gmail.com");
+
+    await expect(
+      closet.update(minji, knit.id, { clothing: { ...NAVY_KNIT, color: "teal" as never }, estimatedWearFrequency: "weekly" }),
+    ).rejects.toThrow();
+    await expect(
+      closet.update(jun, knit.id, { clothing: { ...NAVY_KNIT, name: "내 니트" }, estimatedWearFrequency: "weekly" }),
+    ).rejects.toThrow();
+    expect(await closet.clothing(minji, knit.id)).toEqual(knit);
+  });
+
+  test("replacing the photo keeps the fields, drops the old photo, and does not ask the AI", async () => {
+    const { closet, photos, vision, minji, knit } = await minjiWithKnit();
+    const before = await closet.photoURL(minji, knit.id);
+    const looked = vision.looked.length;
+
+    await closet.replacePhoto(minji, knit.id, photo([0xff, 0xd8, 9, 9]));
+
+    const after = await closet.photoURL(minji, knit.id);
+    expect(after).not.toEqual(before);
+    expect(photos.keys()).toHaveLength(1);
+    expect(await closet.clothing(minji, knit.id)).toEqual(knit);
+    expect(vision.looked).toHaveLength(looked);
+  });
+
+  test("someone else's piece cannot get a new photo", async () => {
+    const { closet, photos, createUser, knit } = await minjiWithKnit();
+    const jun = await createUser("jun@gmail.com");
+
+    await expect(closet.replacePhoto(jun, knit.id, photo())).rejects.toThrow();
+    expect(photos.keys()).toHaveLength(1);
+  });
+});

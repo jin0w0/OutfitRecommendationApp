@@ -50,3 +50,36 @@ export async function registerClothing(request: {
   }
   return { ok: true };
 }
+
+// 고치기.
+export async function updateClothing(
+  clothingId: string,
+  request: { clothing: ClothingFields; estimatedWearFrequency: EstimatedWearFrequency },
+): Promise<RegisterResult> {
+  const userId = await requireUserId();
+  try {
+    await getCloset().update(userId, clothingId, request);
+  } catch (error) {
+    console.error(error);
+    return { ok: false, message: "모든 항목을 골라 주세요." };
+  }
+  return { ok: true };
+}
+
+// 사진 바꾸기: the new photo goes in as it is, without the AI.
+export async function replaceClothingPhoto(formData: FormData): Promise<RegisterResult> {
+  const userId = await requireUserId();
+  const file = formData.get("photo");
+  const clothingId = formData.get("clothingId");
+  if (!(file instanceof File) || typeof clothingId !== "string") return { ok: false, message: "사진을 골라 주세요." };
+  try {
+    await getCloset().replacePhoto(userId, clothingId, {
+      bytes: new Uint8Array(await file.arrayBuffer()),
+      contentType: file.type,
+    });
+  } catch (error) {
+    console.error(error);
+    return { ok: false, message: "JPEG, PNG, WebP 사진만, 5MB까지 올릴 수 있어요." };
+  }
+  return { ok: true };
+}

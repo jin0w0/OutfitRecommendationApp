@@ -181,6 +181,33 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
       };
     },
 
+    // Replaces a piece's fields and 추정 착용 빈도. False if it is not the user's.
+    async updateClothing(
+      userId: string,
+      clothingId: string,
+      clothing: NewClothing,
+      estimatedWearFrequency: EstimatedWearFrequency,
+    ): Promise<boolean> {
+      const result = await db
+        .updateTable("clothing")
+        .set({ ...clothing, seasons: JSON.stringify(clothing.seasons), estimated_wear_frequency: estimatedWearFrequency })
+        .where("user_id", "=", userId)
+        .where("id", "=", clothingId)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows) > 0;
+    },
+
+    // Points a piece at another photo. False if it is not the user's.
+    async setPhotoKey(userId: string, clothingId: string, photoKey: string): Promise<boolean> {
+      const result = await db
+        .updateTable("clothing")
+        .set({ photo_key: photoKey })
+        .where("user_id", "=", userId)
+        .where("id", "=", clothingId)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows) > 0;
+    },
+
     // Where a piece's photo is kept, if it is the user's and has one.
     async photoKey(userId: string, clothingId: string): Promise<string | null> {
       const row = await db

@@ -73,8 +73,7 @@ export function createCloset({
   return {
     // 사진 분석하기: keeps the photo for the user and asks the AI what it is.
     async analyzePhoto(userId: string, photo: Photo): Promise<AnalysedPhoto> {
-      if (!PHOTO_TYPES.includes(photo.contentType)) throw new Error("Only JPEG, PNG or WebP photos");
-      if (photo.bytes.byteLength > MAX_PHOTO_BYTES) throw new Error("Photos must be at most 5MB");
+      checkPhoto(photo);
       const photoId = randomUUID();
       await photos.put(photoKey(userId, photoId), photo);
       try {
@@ -95,6 +94,34 @@ export function createCloset({
       const key = photoKey(userId, photoId);
       if (!(await photos.exists(key))) throw new Error("No such photo for this user");
       return wardrobe.addClothing(userId, fields, { photoKey: key, estimatedWearFrequency });
+    },
+
+    // 고치기: the user's corrected fields and 추정 착용 빈도.
+    async update(
+      userId: string,
+      clothingId: string,
+      { clothing, estimatedWearFrequency }: Omit<RegisterRequest, "photoId">,
+    ) {
+      const fields = checkedFields(clothing);
+      if (!ESTIMATED_WEAR_FREQUENCIES.includes(estimatedWearFrequency)) {
+        throw new Error("Unknown 추정 착용 빈도");
+      }
+      if (!(await wardrobe.updateClothing(userId, clothingId, fields, estimatedWearFrequency))) {
+        throw new Error("No such piece for this user");
+      }
+    },
+
+    // 사진 바꾸기: a new photo for the piece, as it is (no AI); the old one goes.
+    async replacePhoto(userId: string, clothingId: string, photo: Photo) {
+      checkPhoto(photo);
+      const oldKey = await wardrobe.photoKey(userId, clothingId);
+      if (!(await wardrobe.clothes(userId)).some((c) => c.id === clothingId)) {
+        throw new Error("No such piece for this user");
+      }
+      const newKey = photoKey(userId, randomUUID());
+      await photos.put(newKey, photo);
+      await wardrobe.setPhotoKey(userId, clothingId, newKey);
+      if (oldKey) await photos.remove(oldKey);
     },
 
     // 옷장 보기.
@@ -130,6 +157,11 @@ export function createCloset({
 }
 
 export type Closet = ReturnType<typeof createCloset>;
+
+function checkPhoto(photo: Photo) {
+  if (!PHOTO_TYPES.includes(photo.contentType)) throw new Error("Only JPEG, PNG or WebP photos");
+  if (photo.bytes.byteLength > MAX_PHOTO_BYTES) throw new Error("Photos must be at most 5MB");
+}
 
 function userPrefix(userId: string) {
   return `users/${userId}/clothing/`;

@@ -53,7 +53,12 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/[id]">, "params">) {
   return (
     <>
       <ClothingPhoto clothing={clothing} className="aspect-square w-full max-w-sm" />
-      <h1 className="text-2xl font-semibold">{clothing.name}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">{clothing.name}</h1>
+        <Link href={`/wardrobe/${clothing.id}/edit`} className="text-sm underline">
+          고치기
+        </Link>
+      </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
