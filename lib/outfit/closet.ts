@@ -100,6 +100,11 @@ export function createCloset({
     // 옷장 보기.
     clothes: (userId: string) => wardrobe.clothes(userId),
 
+    // One piece of the user's 옷장, or null if it is not theirs.
+    async clothing(userId: string, clothingId: string): Promise<Clothing | null> {
+      return (await wardrobe.clothes(userId)).find((c) => c.id === clothingId) ?? null;
+    },
+
     // 사진 주소 얻기: a short-lived URL for the owner's photo, else null.
     async photoURL(userId: string, clothingId: string): Promise<string | null> {
       const key = await wardrobe.photoKey(userId, clothingId);

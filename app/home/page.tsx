@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import type { CurrentUser } from "@/lib/account/account";
 import { getAccount } from "@/lib/account/server";
-import { getOutfitRecommender } from "@/lib/outfit/server";
+import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
 import { isEventKind } from "@/lib/outfit/situations";
 import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
@@ -25,6 +26,16 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   const user = await getAccount().getCurrentUser(requestHeaders);
   if (!user) redirect("/?next=/home");
   if (user.needsOnboarding || user.shouldAskPreferences || user.shouldInviteCalendar) redirect("/onboarding");
+
+  // Nothing to recommend from yet: 옷 등록 comes first.
+  if ((await getCloset().clothes(user.id)).length === 0) {
+    return (
+      <>
+        <UserBar user={user} />
+        <EmptyWardrobe />
+      </>
+    );
+  }
 
   const params = await searchParams;
   const date = homeDate(params.date);
@@ -66,6 +77,21 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   );
 }
 
+function EmptyWardrobe() {
+  return (
+    <section className="flex flex-col items-start gap-4 rounded-xl border border-zinc-200 p-6 dark:border-zinc-800">
+      <h2 className="text-xl font-semibold">먼저 옷장을 채워 주세요</h2>
+      <p className="text-zinc-600 dark:text-zinc-400">
+        옷 사진을 올리면 AI가 종류와 색을 알아서 채워 줘요. 상의, 하의, 신발이 한 벌씩 있으면 첫 코디를 추천받을 수
+        있어요.
+      </p>
+      <Link href="/wardrobe/new" className="rounded-full bg-foreground px-6 py-3 text-background">
+        옷 등록하기
+      </Link>
+    </section>
+  );
+}
+
 function UserBar({ user }: { user: CurrentUser }) {
   return (
     <header className="flex items-center gap-3">
@@ -74,12 +100,12 @@ function UserBar({ user }: { user: CurrentUser }) {
         <img src={user.image} alt="" className="h-10 w-10 rounded-full" />
       )}
       <span className="flex-1 font-medium">{user.name}</span>
-      <a href="/wardrobe" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+      <Link href="/wardrobe" className="text-sm text-zinc-600 underline dark:text-zinc-400">
         옷장
-      </a>
-      <a href="/settings" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+      </Link>
+      <Link href="/settings" className="text-sm text-zinc-600 underline dark:text-zinc-400">
         설정
-      </a>
+      </Link>
       <form action={signOut}>
         <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">
           로그아웃

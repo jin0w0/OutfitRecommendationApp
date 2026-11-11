@@ -1,8 +1,16 @@
 // What each clothing value is called on screen.
-import type { EstimatedWearFrequency, Material, Season } from "./wardrobe";
+import type { EstimatedWearFrequency, Material, Season, Slot } from "./wardrobe";
 
 export { COLOR_NAMES, STYLE_NAMES } from "./reasons";
 export { FORMALITY_NAMES } from "./situations";
+
+export const SLOT_NAMES: Record<Slot, string> = {
+  top: "상의",
+  bottom: "하의",
+  dress: "원피스",
+  outer: "아우터",
+  shoes: "신발",
+};
 
 export const SEASON_NAMES: Record<Season, string> = {
   spring: "봄",

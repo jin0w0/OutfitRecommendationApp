@@ -9,6 +9,7 @@ import {
   FORMALITY_NAMES,
   MATERIAL_NAMES,
   SEASON_NAMES,
+  SLOT_NAMES,
   STYLE_NAMES,
   WARMTH_NAMES,
 } from "@/lib/outfit/clothing-names";
@@ -25,8 +26,6 @@ import {
   type EstimatedWearFrequency,
 } from "@/lib/outfit/wardrobe";
 import { analyseClothingPhoto, registerClothing } from "../actions";
-
-const SLOT_NAMES = { top: "상의", bottom: "하의", dress: "원피스", outer: "아우터", shoes: "신발" };
 
 // Photos are shrunk in the browser before upload: smaller to send, cheaper to analyse.
 const MAX_SIDE = 1600;

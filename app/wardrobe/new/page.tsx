@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -9,9 +10,9 @@ export default function RegisterClothing() {
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-6 py-12">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">옷 등록</h1>
-        <a href="/wardrobe" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+        <Link href="/wardrobe" className="text-sm text-zinc-600 underline dark:text-zinc-400">
           옷장으로
-        </a>
+        </Link>
       </div>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         사진 한 장에 옷 한 벌이 잘 보이게 찍어 주세요. 여러 장(최대 10장)을 고르면 한 장씩 차례로 확인해요. AI가

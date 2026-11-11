@@ -218,3 +218,14 @@ describe("선호 색상·스타일", () => {
     expect(await closet.preferences(minji)).toEqual({ colors: [], styles: [] });
   });
 });
+
+describe("옷장 보기", () => {
+  test("a piece can be looked up by its owner only", async () => {
+    const { closet, createUser, minji, photoId } = await minjiWithAnalysedKnit();
+    const knit = await closet.register(minji, { photoId, clothing: NAVY_KNIT, estimatedWearFrequency: "monthly" });
+    const jun = await createUser("jun@gmail.com");
+
+    expect(await closet.clothing(minji, knit.id)).toEqual(knit);
+    expect(await closet.clothing(jun, knit.id)).toBeNull();
+  });
+});

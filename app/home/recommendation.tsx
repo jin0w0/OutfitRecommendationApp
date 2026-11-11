@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ClothingPhoto } from "../clothing-photo";
 import type { DayEvent, Factor, Outfit, Recommendation, Revision } from "@/lib/outfit/recommender";
 import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit, undoRevision } from "./actions";
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
@@ -118,6 +119,7 @@ export function RecommendationView({
               return (
                 <li key={slot} className="flex items-center gap-3 px-4 py-3">
                   <span className="w-14 text-sm text-zinc-500">{SLOT_NAMES[slot]}</span>
+                  <ClothingPhoto clothing={clothing} className="h-12 w-12 shrink-0" />
                   <span className="flex-1">{clothing.name}</span>
                   <span className="text-xs text-zinc-500">{FORMALITY_NAMES[clothing.formality]}</span>
                 </li>

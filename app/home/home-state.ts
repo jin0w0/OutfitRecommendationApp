@@ -1,19 +1,14 @@
 // What the home screen keeps in its URL (the date, the 코디 already shown, and
 // why the last 대화 message changed nothing) and how it names slots and 수정
 // 조건. The page, its server actions and its components all go through here.
+import { SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { isDate, todayInKorea } from "@/lib/outfit/dates";
 import type { Recommendation, RevisionCondition, StyleDirection } from "@/lib/outfit/recommender";
 import type { Slot } from "@/lib/outfit/wardrobe";
 
-type SearchParams = Record<string, string | string[] | undefined>;
+export { SLOT_NAMES };
 
-export const SLOT_NAMES: Record<Slot, string> = {
-  top: "상의",
-  bottom: "하의",
-  dress: "원피스",
-  outer: "아우터",
-  shoes: "신발",
-};
+type SearchParams = Record<string, string | string[] | undefined>;
 
 function isSlot(value: unknown): value is Slot {
   return typeof value === "string" && Object.hasOwn(SLOT_NAMES, value);
