@@ -124,7 +124,9 @@ type FoundDay = Omit<RecommendationContext, "accepted">;
 
 // A 추천 세션 step as stored: the 추천 결과, which is a 수정 결과 unless
 // `revision` is null (날짜로 추천받기's).
-type Step = OutfitChoice & { revision: Revision | null };
+// `fixed`: the piece the 추천 was asked to keep (고정 추천), which every
+// later 수정 keeps too. Absent in sessions from before it existed.
+type Step = OutfitChoice & { revision: Revision | null; fixed?: Clothing | null };
 
 // The day of a session step, as stored. The 기준 일정 is the one among the
 // day's 일정 again, as it was returned.
@@ -178,6 +180,9 @@ export type Recommendation = Step & {
 
 // Below this 기온 (°C) the 코디 gets an 아우터.
 const OUTER_BELOW = 17;
+
+// How many 활용 코디 are made at most.
+const STYLING_OUTFITS = 3;
 
 // How many days ago a piece with no 착용 기록 is taken to have been worn, by
 // its 추정 착용 빈도. A new piece counts as never worn.
@@ -276,6 +281,7 @@ export function createOutfitRecommender({
       situation,
       location,
       shown = [],
+      fixedClothingId,
     }: {
       userId: string;
       // YYYY-MM-DD
@@ -284,15 +290,60 @@ export function createOutfitRecommender({
       // Where the 코디 is worn: the user's 기본 지역 for now.
       location: Coordinates;
       shown?: string[][];
+      // 고정 추천: a piece of the 옷장 every 코디 of the session must have.
+      fixedClothingId?: string;
     }): Promise<Recommendation> {
       const day = await findDay(userId, date, situation, location);
-      const step = await recommend(userId, day, await wardrobe.clothes(userId), {
+      const clothes = await wardrobe.clothes(userId);
+      const fixed = clothes.find((c) => c.id === fixedClothingId) ?? null;
+      const step = await recommend(userId, day, clothes, {
         formality: day.basis?.formality ?? null,
-        conditions: [],
+        conditions: fixedConditions(fixed),
         shown,
       });
-      const sessionId = await sessions.start<Step>(userId, date, { ...step, revision: null });
+      const sessionId = await sessions.start<Step>(userId, date, { ...step, revision: null, fixed });
       return { ...step, sessionId, step: 0, revision: null, unapplied: null };
+    },
+
+    // 활용 코디: up to STYLING_OUTFITS different 코디 with the piece, the
+    // best scored first, for `date` at `location` and, if given, at
+    // `formality`. Without 추천 이유, so the LLM is not asked.
+    async stylingOutfits({
+      userId,
+      clothingId,
+      date,
+      location,
+      formality = null,
+    }: {
+      userId: string;
+      clothingId: string;
+      date: string;
+      location: Coordinates;
+      formality?: Formality | null;
+    }): Promise<Outfit[]> {
+      const clothes = await wardrobe.clothes(userId);
+      const piece = clothes.find((c) => c.id === clothingId);
+      if (!piece) return [];
+      // Only the weather: no 일정, so neither the calendar nor the LLM.
+      const weather = await weatherSource.forecast({ date, ...location }).catch(() => null);
+      const day: FoundDay = {
+        date,
+        situation: null,
+        location,
+        events: [],
+        baseEvent: null,
+        basis: null,
+        weather,
+        weatherPlace: null,
+        missing: [],
+      };
+      const scoring = await scoringFacts(userId, day);
+      const { candidates } = outfitsUnder(clothes, day.weather, formality, fixedConditions(piece));
+      return candidates
+        .map((outfit) => ({ outfit, total: total(score(outfit, scoring)) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, STYLING_OUTFITS)
+        .map(({ outfit }) => outfit);
     },
 
     // 대화로 수정하기: the 코디 of the session's latest step, changed as
@@ -333,7 +384,7 @@ export function createOutfitRecommender({
       // Nothing asked of the 코디: the user is asked to talk about the 코디
       // instead.
       if (!asked.conditions.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
-      const earlier = last.revision?.conditions ?? [];
+      const earlier = last.revision?.conditions ?? fixedConditions(session.steps[0].fixed);
       const conditions = accumulate(earlier, asked.conditions);
       const day = dayOf(last);
       const anchor = anchorFormality(day, session.steps[0]);
@@ -442,7 +493,7 @@ export function createOutfitRecommender({
       const last = session.steps.at(-1)!;
       if (!last.location) return null;
       const day = await findDay(userId, last.date, last.situation ?? null, last.location);
-      const conditions = last.revision?.conditions ?? [];
+      const conditions = last.revision?.conditions ?? fixedConditions(session.steps[0].fixed);
       const step = await recommend(userId, day, await wardrobe.clothes(userId), {
         formality: shifted(anchorFormality(day, session.steps[0]), conditions),
         conditions,
@@ -628,6 +679,11 @@ function outfitsUnder(
       (!color || Object.values(outfit).some((c) => hasColorDirection(c.color, color.direction))),
   );
   return { clothes, candidates };
+}
+
+// The 수정 조건 a 고정 추천 starts with.
+function fixedConditions(fixed: Clothing | null | undefined): RevisionCondition[] {
+  return fixed ? [{ type: "keep", clothing: fixed }] : [];
 }
 
 function outfitKey(outfit: Outfit) {

@@ -56,6 +56,8 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
           situation,
           location: { latitude, longitude },
           shown,
+          // 고정 추천 from the 옷장 분석.
+          fixedClothingId: typeof params.fixed === "string" ? params.fixed : undefined,
         });
 
   return (

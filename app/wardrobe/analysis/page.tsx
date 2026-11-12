@@ -53,7 +53,9 @@ function UnwornCard({ item }: { item: UnwornClothing }) {
     <li id={clothing.id} className="flex gap-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
       <ClothingPhoto clothing={clothing} className="h-20 w-20 shrink-0" />
       <div className="flex flex-1 flex-col gap-1">
-        <span className="font-medium">{clothing.name}</span>
+        <Link href={`/wardrobe/analysis/${clothing.id}`} className="font-medium underline-offset-2 hover:underline">
+          {clothing.name}
+        </Link>
         <span className="text-xs text-zinc-500">
           {lastWornOn ? `${daysBetween(lastWornOn, todayInKorea())}일 전에 입었어요` : "아직 입은 기록이 없어요"}
         </span>
@@ -63,6 +65,14 @@ function UnwornCard({ item }: { item: UnwornClothing }) {
           <p className="rounded-md bg-zinc-50 p-2 text-sm dark:bg-zinc-900">{CARE_TIPS[clothing.material]}</p>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
+          {item.remedies.includes("styling-outfits") && (
+            <Link
+              href={`/wardrobe/analysis/${clothing.id}`}
+              className="rounded-full bg-foreground px-3 py-1 text-background"
+            >
+              활용 코디 보기
+            </Link>
+          )}
           {item.remedies.includes("tidy-suggestion") && (
             <form action={tidyFromAnalysis}>
               <input type="hidden" name="clothingId" value={clothing.id} />
