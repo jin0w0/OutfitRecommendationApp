@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import type { UnwornClothing } from "@/lib/outfit/analysis";
+import { verdictSentence } from "@/lib/outfit/analysis-sentences";
 import { daysBetween, todayInKorea } from "@/lib/outfit/dates";
 import { getWardrobeAnalysis } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../clothing-photo";
@@ -45,7 +46,7 @@ async function Unworn() {
 }
 
 function UnwornCard({ item }: { item: UnwornClothing }) {
-  const { clothing, lastWornOn, verdict } = item;
+  const { clothing, lastWornOn } = item;
   return (
     <li id={clothing.id} className="flex gap-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
       <ClothingPhoto clothing={clothing} className="h-20 w-20 shrink-0" />
@@ -54,9 +55,7 @@ function UnwornCard({ item }: { item: UnwornClothing }) {
         <span className="text-xs text-zinc-500">
           {lastWornOn ? `${daysBetween(lastWornOn, todayInKorea())}일 전에 입었어요` : "아직 입은 기록이 없어요"}
         </span>
-        <p className="text-sm">
-          {verdict.kind === "new" ? "새로 들어온 옷이에요. 이렇게 입어 보세요." : "왜 잘 안 입으세요?"}
-        </p>
+        <p className="text-sm">{verdictSentence(item)}</p>
       </div>
     </li>
   );

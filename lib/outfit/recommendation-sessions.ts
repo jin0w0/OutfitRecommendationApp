@@ -81,6 +81,19 @@ export function createRecommendationSessions({ dialect }: { dialect: Dialect }) 
       return row && { id: row.id, date: row.date, steps: row.steps as Step[] };
     },
 
+    // The first step of each of the user's sessions for dates from `from` up
+    // to and including `to` (YYYY-MM-DD): what each day was first asked for.
+    async firstStepsBetween<Step>(userId: string, from: string, to: string): Promise<Step[]> {
+      const rows = await db
+        .selectFrom("recommendation_session")
+        .select("steps")
+        .where("user_id", "=", userId)
+        .where("date", ">=", from)
+        .where("date", "<=", to)
+        .execute();
+      return rows.flatMap((row) => (row.steps.length ? [row.steps[0] as Step] : []));
+    },
+
     // Replaces the session's steps.
     async saveSteps<Step>(userId: string, id: string, steps: Step[]) {
       await db

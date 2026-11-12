@@ -31,6 +31,7 @@ export function getWardrobeAnalysis(): WardrobeAnalysis {
     analysisInstance = createWardrobeAnalysis({
       wardrobe: createWardrobe({ dialect }),
       wearRecords: createWearRecords({ dialect }),
+      sessions: createRecommendationSessions({ dialect }),
     });
   }
   return analysisInstance;

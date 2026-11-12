@@ -305,13 +305,29 @@ export function total(scores: Scores) {
   );
 }
 
-function colorHarmony(items: Clothing[]) {
+// Every complete 코디 the 옷장 can make: 상의·하의·신발, or 원피스·신발, each
+// with an 아우터 when one is needed and the 옷장 has any.
+export function candidateOutfits(clothes: Clothing[], needsOuter: boolean): Outfit[] {
+  const of = (slot: Clothing["slot"]) => clothes.filter((c) => c.slot === slot);
+  const outfits: Outfit[] = [];
+  for (const shoes of of("shoes")) {
+    for (const top of of("top")) {
+      for (const bottom of of("bottom")) outfits.push({ top, bottom, shoes });
+    }
+    for (const dress of of("dress")) outfits.push({ dress, shoes });
+  }
+  const outers = of("outer");
+  if (!needsOuter || !outers.length) return outfits;
+  return outfits.flatMap((outfit) => outers.map((outer) => ({ ...outfit, outer })));
+}
+
+export function colorHarmony(items: Clothing[]) {
   const accents = new Set(items.map((c) => c.color).filter((color) => !NEUTRAL_COLORS.has(color)));
   return accents.size <= 1 ? 1 : accents.size === 2 ? 0.5 : 0;
 }
 
 // The share of the 코디 in its most common style.
-function styleConsistency(items: Clothing[]) {
+export function styleConsistency(items: Clothing[]) {
   const counts = new Map<string, number>();
   for (const { style } of items) counts.set(style, (counts.get(style) ?? 0) + 1);
   return Math.max(...counts.values()) / items.length;

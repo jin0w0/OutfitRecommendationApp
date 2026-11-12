@@ -19,6 +19,7 @@ import type {
   WeatherSource,
 } from "./ports";
 import {
+  candidateOutfits,
   FORMALITY_LEVEL,
   maxBy,
   score,
@@ -709,22 +710,6 @@ function missingSlots(clothes: Clothing[]): Slot[] {
   }
   if (!has("shoes")) missing.push("shoes");
   return missing;
-}
-
-// Every complete 코디 the 옷장 can make: 상의·하의·신발, or 원피스·신발, each
-// with an 아우터 when one is needed and the 옷장 has any.
-function candidateOutfits(clothes: Clothing[], needsOuter: boolean): Outfit[] {
-  const of = (slot: Slot) => clothes.filter((c) => c.slot === slot);
-  const outfits: Outfit[] = [];
-  for (const shoes of of("shoes")) {
-    for (const top of of("top")) {
-      for (const bottom of of("bottom")) outfits.push({ top, bottom, shoes });
-    }
-    for (const dress of of("dress")) outfits.push({ dress, shoes });
-  }
-  const outers = of("outer");
-  if (!needsOuter || !outers.length) return outfits;
-  return outfits.flatMap((outfit) => outers.map((outer) => ({ ...outfit, outer })));
 }
 
 export type OutfitRecommender = ReturnType<typeof createOutfitRecommender>;

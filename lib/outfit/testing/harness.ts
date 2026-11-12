@@ -52,7 +52,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   const photos = new FakePhotoStorage();
   const vision = new FakeClothingVision();
   const closet = createCloset({ wardrobe, photos, vision });
-  const analysis = createWardrobeAnalysis({ wardrobe, wearRecords, today: () => today });
+  const analysis = createWardrobeAnalysis({ wardrobe, wearRecords, sessions, today: () => today });
 
   const signedIn = new Map<string, Headers>();
 
