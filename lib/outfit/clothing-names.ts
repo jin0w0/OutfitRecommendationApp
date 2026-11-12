@@ -1,5 +1,5 @@
 // What each clothing value is called on screen.
-import type { EstimatedWearFrequency, Material, Season, Slot } from "./wardrobe";
+import type { Color, EstimatedWearFrequency, Material, Season, Slot } from "./wardrobe";
 
 export { COLOR_NAMES, STYLE_NAMES } from "./reasons";
 export { FORMALITY_NAMES } from "./situations";
@@ -10,6 +10,25 @@ export const SLOT_NAMES: Record<Slot, string> = {
   dress: "원피스",
   outer: "아우터",
   shoes: "신발",
+};
+
+// The 15 colors as swatches on screen.
+export const COLOR_SWATCHES: Record<Color, string> = {
+  black: "#1f1f1f",
+  white: "#f7f7f5",
+  gray: "#9a9a9a",
+  navy: "#1f2a4d",
+  beige: "#d9c7a7",
+  brown: "#7a5232",
+  red: "#c8322f",
+  pink: "#efa3b8",
+  orange: "#ec7a2d",
+  yellow: "#f1cf3c",
+  green: "#3e8a4f",
+  khaki: "#8c8a5a",
+  skyblue: "#8ec5ea",
+  blue: "#2f6bd1",
+  purple: "#7a4fb3",
 };
 
 export const SEASON_NAMES: Record<Season, string> = {

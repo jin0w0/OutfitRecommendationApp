@@ -2,7 +2,7 @@
 // from the 옷장, the 착용 기록, the 추천 세션 and the user's own answers.
 // Every rule is in this file, its numbers in one place.
 import { addDays, daysBetween, koreaDate, todayInKorea, weekStart } from "./dates";
-import { candidateOutfits, colorHarmony, styleConsistency, type Basis } from "./scoring";
+import { candidateOutfits, isWellMatched, type Basis } from "./scoring";
 import {
   ASSUMED_DAYS_SINCE_WORN,
   type Color,
@@ -27,8 +27,6 @@ const NEW_DAYS = 14;
 const SITUATION_DAYS = 60;
 // A look-alike worn this recently makes a 대체재 중복.
 const SUBSTITUTE_DAYS = 30;
-// A 코디 is well matched when both its color and style scores reach this.
-const WELL_MATCHED = 0.7;
 // Fewer well-matched 코디 than this is 조합 부족.
 const ENOUGH_COMBINATIONS = 2;
 // How far back what the user usually wears is looked at, and how many of the
@@ -302,7 +300,7 @@ function lackingCombinations(clothing: Clothing, { clothes }: Facts): Cause | nu
   let wellMatched = 0;
   for (const outfit of withIt) {
     const items = Object.values(outfit);
-    if (colorHarmony(items) >= WELL_MATCHED && styleConsistency(items) >= WELL_MATCHED) wellMatched++;
+    if (isWellMatched(items)) wellMatched++;
     if (wellMatched >= ENOUGH_COMBINATIONS) return null;
   }
   return { type: "combination", wellMatched };

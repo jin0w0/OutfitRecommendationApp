@@ -40,6 +40,14 @@ export async function showAnotherWeeklyPick() {
   redirect("/home");
 }
 
+// 이 한 벌 제안의 "되돌려 보세요": back from the 정리한 옷, then where it was.
+export async function restoreSuggestedClothing(formData: FormData) {
+  const userId = await requireUserId();
+  await getCloset().restore(userId, String(formData.get("clothingId")));
+  const returnTo = String(formData.get("returnTo") ?? "");
+  redirect(returnTo.startsWith("/wardrobe/analysis/") || returnTo === "/home" ? returnTo : "/wardrobe/analysis");
+}
+
 // 정리 제안에서 바로 정리하기.
 export async function tidyFromAnalysis(formData: FormData) {
   const userId = await requireUserId();

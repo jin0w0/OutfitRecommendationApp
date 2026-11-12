@@ -200,6 +200,17 @@ function checkedDraft(clothing: Draft): Draft {
   };
 }
 
+// Fields from outside (the user, the LLM) when every one is filled and in
+// the value lists; else null.
+export function validClothingFields(raw: unknown): ClothingFields | null {
+  if (!raw || typeof raw !== "object") return null;
+  try {
+    return checkedFields(raw as ClothingFields);
+  } catch {
+    return null;
+  }
+}
+
 // The user's confirmed fields, refused unless every one is filled and valid.
 function checkedFields(clothing: ClothingFields): ClothingFields {
   const draft = checkedDraft(clothing);

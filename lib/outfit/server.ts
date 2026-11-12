@@ -21,10 +21,31 @@ import { createNeonPhotoStorage } from "./neon-photo-storage";
 import { createOpenAiClothingVision } from "./openai-vision";
 import { createWardrobeAnalysis, type WardrobeAnalysis } from "./analysis";
 import { createAnalysisStore } from "./analysis-store";
+import { createPieceSuggestions, type PieceSuggestions } from "./one-more-piece";
+import { createPieceStore } from "./one-more-piece-store";
+import { createOpenAiPieceAdviser } from "./openai-piece-adviser";
 
 let instance: OutfitRecommender | undefined;
 let closetInstance: Closet | undefined;
 let analysisInstance: WardrobeAnalysis | undefined;
+let piecesInstance: PieceSuggestions | undefined;
+
+// The app's single 이 한 벌 제안 module, over the 옷장 in Neon and OpenAI.
+export function getPieceSuggestions(): PieceSuggestions {
+  if (!piecesInstance) {
+    const dialect = new PostgresDialect({ pool: new Pool({ connectionString: requiredEnv("DATABASE_URL") }) });
+    const apiKey = process.env.OPENAI_API_KEY;
+    piecesInstance = createPieceSuggestions({
+      wardrobe: createWardrobe({ dialect }),
+      // Without a key every request fails, so nothing is suggested.
+      adviser: apiKey
+        ? createOpenAiPieceAdviser({ apiKey, model: process.env.OPENAI_MODEL || undefined })
+        : { proposePieces: async () => Promise.reject(new Error("Missing environment variable OPENAI_API_KEY")) },
+      store: createPieceStore({ dialect }),
+    });
+  }
+  return piecesInstance;
+}
 
 // The app's single 옷장 분석 module, over the 옷장 and 착용 기록 in Neon.
 export function getWardrobeAnalysis(): WardrobeAnalysis {

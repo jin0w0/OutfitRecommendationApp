@@ -18,6 +18,9 @@ import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
 import { createTuningStore } from "../tuning-store";
+import { createPieceSuggestions } from "../one-more-piece";
+import { createPieceStore } from "../one-more-piece-store";
+import { FakePieceAdviser } from "./fake-piece-adviser";
 import { createCloset } from "../closet";
 import { createWardrobeAnalysis } from "../analysis";
 import { createAnalysisStore } from "../analysis-store";
@@ -71,6 +74,11 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     tuning,
     today: () => current,
   });
+
+  const pieceStore = createPieceStore({ dialect });
+  await pieceStore.migrate();
+  const pieceAdviser = new FakePieceAdviser();
+  const pieces = createPieceSuggestions({ wardrobe, adviser: pieceAdviser, store: pieceStore, today: () => current });
 
   const signedIn = new Map<string, Headers>();
 
@@ -126,6 +134,8 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     recommender,
     closet,
     analysis,
+    pieces,
+    pieceAdviser,
     setToday,
     photos,
     vision,

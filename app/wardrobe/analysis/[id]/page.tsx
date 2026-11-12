@@ -7,8 +7,9 @@ import { stylingFormality } from "@/lib/outfit/analysis";
 import { verdictSentence } from "@/lib/outfit/analysis-sentences";
 import { SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { todayInKorea } from "@/lib/outfit/dates";
-import { getOutfitRecommender, getWardrobeAnalysis } from "@/lib/outfit/server";
+import { getOutfitRecommender, getPieceSuggestions, getWardrobeAnalysis } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../../clothing-photo";
+import { PieceSuggestionCards } from "../../../piece-suggestions";
 
 // One 안 입는 옷 with its 활용 코디, made on demand for today's weather.
 export default function UnwornDetail({ params }: PageProps<"/wardrobe/analysis/[id]">) {
@@ -45,6 +46,9 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
           formality: stylingFormality(item),
         })
       : [];
+  // 조합 부족: what one more piece would bring.
+  const lacking = item.verdict.kind === "cause" && item.verdict.cause.type === "combination";
+  const suggestions = lacking ? await getPieceSuggestions().reviving(user.id, id) : [];
 
   return (
     <>
@@ -90,6 +94,7 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
           )}
         </section>
       )}
+      <PieceSuggestionCards suggestions={suggestions} returnTo={`/wardrobe/analysis/${id}`} />
     </>
   );
 }

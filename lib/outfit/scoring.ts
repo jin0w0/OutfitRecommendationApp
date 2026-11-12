@@ -323,6 +323,14 @@ export function candidateOutfits(clothes: Clothing[], needsOuter: boolean): Outf
   return outfits.flatMap((outfit) => outers.map((outer) => ({ ...outfit, outer })));
 }
 
+// A 코디 counts as well matched, for the 옷장 분석 and 이 한 벌 제안, when
+// both its color and its style scores reach this.
+const WELL_MATCHED = 0.7;
+
+export function isWellMatched(items: Clothing[]) {
+  return colorHarmony(items) >= WELL_MATCHED && styleConsistency(items) >= WELL_MATCHED;
+}
+
 export function colorHarmony(items: Clothing[]) {
   const accents = new Set(items.map((c) => c.color).filter((color) => !NEUTRAL_COLORS.has(color)));
   return accents.size <= 1 ? 1 : accents.size === 2 ? 0.5 : 0;
