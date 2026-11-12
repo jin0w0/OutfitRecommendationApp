@@ -33,6 +33,13 @@ export async function keepClothingAsIs(formData: FormData) {
   redirect("/wardrobe/analysis");
 }
 
+// 다른 옷 보기 on the main screen card.
+export async function showAnotherWeeklyPick() {
+  const userId = await requireUserId();
+  await getWardrobeAnalysis().showAnotherPick(userId);
+  redirect("/home");
+}
+
 // 정리 제안에서 바로 정리하기.
 export async function tidyFromAnalysis(formData: FormData) {
   const userId = await requireUserId();

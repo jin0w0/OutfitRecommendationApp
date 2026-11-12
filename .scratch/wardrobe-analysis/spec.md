@@ -1,6 +1,6 @@
 # 옷장 분석: "왜 나는 이 옷을 안 입을까?"
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

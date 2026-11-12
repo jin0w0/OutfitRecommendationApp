@@ -8,6 +8,7 @@ import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
 import { isEventKind } from "@/lib/outfit/situations";
 import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
+import { WeeklyPick } from "./weekly-pick";
 import { OutfitRequestForm, RecommendationView } from "./recommendation";
 import { homeDate, noticeFrom, shownFrom } from "./home-state";
 
@@ -63,6 +64,7 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   return (
     <>
       <UserBar user={user} />
+      <WeeklyPick userId={user.id} />
       {(user.calendarConnection?.status === "reconnect-needed" ||
         recommendation.missing.includes("calendar-reconnect-needed")) && (
         <ReconnectNotice returnTo="/home" />

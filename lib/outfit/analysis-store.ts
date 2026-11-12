@@ -1,6 +1,6 @@
 // What the 옷장 분석 keeps of its own: the user's answers about 안 입는 옷 and
 // the pieces they asked to 그대로 두기. Removed with the user or the piece.
-import { Kysely, type Dialect } from "kysely";
+import { Kysely, type Dialect, type JSONColumnType } from "kysely";
 
 export const ANSWERS = ["care", "changed-mind", "forgot"] as const;
 // Why the user says they do not wear a piece: 관리 번거로움, 마음 변화, or
@@ -10,7 +10,12 @@ export type Answer = (typeof ANSWERS)[number];
 type Tables = {
   clothing_answer: { user_id: string; clothing_id: string; answer: Answer; answered_on: string };
   clothing_kept: { user_id: string; clothing_id: string; until: string };
+  weekly_pick: { user_id: string; week_start: string; clothing_id: string; shown: JSONColumnType<string[]> };
 };
+
+// The 이번 주에 꺼내 볼 옷 as last chosen: for which week, which piece, and
+// every piece shown that week.
+export type WeeklyPick = { weekStart: string; clothingId: string; shown: string[] };
 
 export function createAnalysisStore({ dialect }: { dialect: Dialect }) {
   const db = new Kysely<Tables>({ dialect });
@@ -33,6 +38,28 @@ export function createAnalysisStore({ dialect }: { dialect: Dialect }) {
         .addColumn("clothing_id", "text", (c) => c.notNull().references("clothing.id").onDelete("cascade"))
         .addColumn("until", "text", (c) => c.notNull())
         .addPrimaryKeyConstraint("clothing_kept_pkey", ["user_id", "clothing_id"])
+        .execute();
+      await db.schema
+        .createTable("weekly_pick")
+        .ifNotExists()
+        .addColumn("user_id", "text", (c) => c.primaryKey().references("user.id").onDelete("cascade"))
+        .addColumn("week_start", "text", (c) => c.notNull())
+        .addColumn("clothing_id", "text", (c) => c.notNull())
+        .addColumn("shown", "jsonb", (c) => c.notNull())
+        .execute();
+    },
+
+    async weeklyPick(userId: string): Promise<WeeklyPick | null> {
+      const row = await db.selectFrom("weekly_pick").selectAll().where("user_id", "=", userId).executeTakeFirst();
+      return row ? { weekStart: row.week_start, clothingId: row.clothing_id, shown: row.shown } : null;
+    },
+
+    async saveWeeklyPick(userId: string, { weekStart, clothingId, shown }: WeeklyPick) {
+      const values = { week_start: weekStart, clothing_id: clothingId, shown: JSON.stringify(shown) };
+      await db
+        .insertInto("weekly_pick")
+        .values({ user_id: userId, ...values })
+        .onConflict((oc) => oc.column("user_id").doUpdateSet(values))
         .execute();
     },
 

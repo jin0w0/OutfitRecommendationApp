@@ -84,7 +84,7 @@ export function createWardrobeAnalysis({
   // YYYY-MM-DD in Korea.
   today?: () => string;
 }) {
-  return {
+  const analysis = {
     // 분석하기: the user's 안 입는 옷, the longest unworn first.
     async analyze(userId: string): Promise<UnwornClothing[]> {
       const date = today();
@@ -143,6 +143,25 @@ export function createWardrobeAnalysis({
       return unworn.map(({ registeredOn, ...item }) => (void registeredOn, item));
     },
 
+    // 이번 주에 꺼내 볼 옷: the same piece all week, while it stays a candidate.
+    async weeklyPick(userId: string): Promise<UnwornClothing | null> {
+      const candidates = await pickCandidates(userId);
+      const week = weekStart(today());
+      const saved = await store.weeklyPick(userId);
+      const thisWeek = saved?.weekStart === week ? saved : null;
+      const current = thisWeek && candidates.find((u) => u.clothing.id === thisWeek.clothingId);
+      if (current) return current;
+      return choose(userId, candidates, week, thisWeek?.shown ?? []);
+    },
+
+    // 다른 옷 보기: the next candidate not shown this week, or the first again.
+    async showAnotherPick(userId: string): Promise<UnwornClothing | null> {
+      const candidates = await pickCandidates(userId);
+      const week = weekStart(today());
+      const saved = await store.weeklyPick(userId);
+      return choose(userId, candidates, week, saved?.weekStart === week ? saved.shown : []);
+    },
+
     // 답하기: why the user does not wear a piece the data said nothing about.
     async answer(userId: string, clothingId: string, answer: Answer) {
       if (!ANSWERS.includes(answer)) throw new Error("Unknown answer");
@@ -156,6 +175,29 @@ export function createWardrobeAnalysis({
       await store.keep(userId, clothingId, shift(today(), KEEP_DAYS));
     },
   };
+
+  return analysis;
+
+  // What can be the 이번 주에 꺼내 볼 옷: 안 입는 옷 not out of season, those
+  // back in season first, then the longest unworn.
+  async function pickCandidates(userId: string) {
+    const unworn = await analysis.analyze(userId);
+    const inSeason = unworn.filter((u) => !(u.verdict.kind === "cause" && u.verdict.cause.type === "season"));
+    return [...inSeason.filter((u) => u.backInSeason), ...inSeason.filter((u) => !u.backInSeason)];
+  }
+
+  // The first candidate not in `shown`; after all were shown, the first again.
+  async function choose(userId: string, candidates: UnwornClothing[], week: string, shown: string[]) {
+    if (candidates.length === 0) return null;
+    const next = candidates.find((u) => !shown.includes(u.clothing.id));
+    const picked = next ?? candidates[0];
+    await store.saveWeeklyPick(userId, {
+      weekStart: week,
+      clothingId: picked.clothing.id,
+      shown: next ? [...shown, picked.clothing.id] : [picked.clothing.id],
+    });
+    return picked;
+  }
 
   async function requireOwn(userId: string, clothingId: string) {
     if (!(await wardrobe.clothes(userId)).some((c) => c.id === clothingId)) {
@@ -304,6 +346,12 @@ function usualLooks(records: WearRecord[], clothes: Clothing[], from: string) {
   const top = <T>(counts: Map<T, number>) =>
     [...counts].sort((a, b) => b[1] - a[1]).slice(0, USUAL_TOP).map(([value]) => value);
   return { colors: top(colors), styles: top(styles) };
+}
+
+// The Monday of the week `date` is in (YYYY-MM-DD).
+function weekStart(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return shift(date, -((day + 6) % 7));
 }
 
 function seasonOf(date: string): Season {
