@@ -50,19 +50,26 @@ export async function deleteAccount() {
   redirect("/");
 }
 
-// 선호 색상·스타일 저장하기, from onboarding (which it also moves past) or settings.
+// The 성별 the preferences form was sent with; it cannot be left out.
+function chosenGender(formData: FormData): Gender {
+  const gender = formData.get("gender");
+  if (!GENDERS.includes(gender as Gender)) throw new Error("The 성별 must be chosen");
+  return gender as Gender;
+}
+
+// 성별·선호 색상·스타일 저장하기, from onboarding (which it also moves past) or settings.
 export async function savePreferences(formData: FormData) {
   const requestHeaders = await headers();
   const account = getAccount();
   const user = await account.getCurrentUser(requestHeaders);
   if (!user) redirect("/");
+  const gender = chosenGender(formData);
   // The 옷장 module refuses anything outside the lists.
   await getCloset().setPreferences(user.id, {
     colors: formData.getAll("color").map(String) as Preferences["colors"],
     styles: formData.getAll("style").map(String) as Preferences["styles"],
   });
-  const gender = formData.get("gender");
-  if (GENDERS.includes(gender as Gender)) await getCloset().setGender(user.id, gender as Gender);
+  await getCloset().setGender(user.id, gender);
   if (formData.get("next") === "/settings") redirect("/settings");
   await account.passPreferencesStep(requestHeaders);
   redirect("/onboarding");
@@ -86,8 +93,13 @@ export async function setTiltOff(formData: FormData) {
   redirect("/settings");
 }
 
-export async function skipPreferences() {
+// 건너뛰기 on onboarding skips only the 선호 색상·스타일: the 성별 is saved.
+export async function skipPreferences(formData: FormData) {
   const requestHeaders = await headers();
-  await getAccount().passPreferencesStep(requestHeaders);
+  const account = getAccount();
+  const user = await account.getCurrentUser(requestHeaders);
+  if (!user) redirect("/");
+  await getCloset().setGender(user.id, chosenGender(formData));
+  await account.passPreferencesStep(requestHeaders);
   redirect("/onboarding");
 }
