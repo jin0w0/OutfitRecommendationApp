@@ -1,9 +1,17 @@
 // The 옷장 분석 module: finds the 안 입는 옷 and why each goes unworn (원인),
 // from the 옷장, the 착용 기록, the 추천 세션 and the user's own answers.
 // Every rule is in this file, its numbers in one place.
-import { daysBetween, koreaDate, todayInKorea } from "./dates";
+import { addDays, daysBetween, koreaDate, todayInKorea, weekStart } from "./dates";
 import { candidateOutfits, colorHarmony, styleConsistency, type Basis } from "./scoring";
-import type { Color, Clothing, Formality, Season, Style, Wardrobe } from "./wardrobe";
+import {
+  ASSUMED_DAYS_SINCE_WORN,
+  type Color,
+  type Clothing,
+  type Formality,
+  type Season,
+  type Style,
+  type Wardrobe,
+} from "./wardrobe";
 import type { WearRecord, WearRecords } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
 import { ANSWERS, type Answer, type AnalysisStore } from "./analysis-store";
@@ -96,7 +104,7 @@ export function createWardrobeAnalysis({
         wardrobe.registeredAt(userId),
         wardrobe.preferences(userId),
         wearRecords.wornBefore(userId, date),
-        sessions.firstStepsBetween<{ basis: Basis | null }>(userId, shift(date, -SITUATION_DAYS), date),
+        sessions.firstStepsBetween<{ basis: Basis | null }>(userId, addDays(date, -SITUATION_DAYS), date),
         store.answers(userId),
         store.keptUntil(userId),
       ]);
@@ -108,7 +116,7 @@ export function createWardrobeAnalysis({
         lastWorn,
         recentFormalities: unique(firstSteps.flatMap((step) => (step.basis ? [step.basis.formality] : []))),
         liked: { colors: preferences.colors, styles: preferences.styles },
-        usual: usualLooks(worn, clothes, shift(date, -USUAL_DAYS)),
+        usual: usualLooks(worn, clothes, addDays(date, -USUAL_DAYS)),
       };
 
       const unworn = clothes.flatMap((clothing) => {
@@ -175,7 +183,7 @@ export function createWardrobeAnalysis({
     // 그대로 두기: out of the analysis for KEEP_DAYS.
     async keepAsIs(userId: string, clothingId: string) {
       await requireOwn(userId, clothingId);
-      await store.keep(userId, clothingId, shift(today(), KEEP_DAYS));
+      await store.keep(userId, clothingId, addDays(today(), KEEP_DAYS));
     },
   };
 
@@ -299,6 +307,12 @@ const ANSWER_REMEDIES: Record<Answer, Remedy[]> = {
   forgot: ["styling-outfits"],
 };
 
+// The 격식 수준 the 활용 코디 are made at: the piece's own when the 일정
+// did not match it (상황 불일치), else any.
+export function stylingFormality({ verdict }: UnwornClothing): Formality | null {
+  return verdict.kind === "cause" && verdict.cause.type === "situation" ? verdict.cause.formality : null;
+}
+
 function remediesFor(verdict: Verdict): Remedy[] {
   if (verdict.kind === "new") return ["styling-outfits"];
   if (verdict.kind === "ask") return [];
@@ -318,11 +332,12 @@ function isBackInSeason(clothing: Clothing, season: Season) {
   return clothing.seasons.includes(season) && !clothing.seasons.includes(previous);
 }
 
-// A piece is 안 입는 옷 when its latest wear is UNWORN_DAYS or more ago, or,
-// never worn, unless the user said they wear it weekly or monthly.
+// A piece is 안 입는 옷 when its latest wear, or with no 착용 기록 the one
+// its 추정 착용 빈도 suggests, is UNWORN_DAYS or more ago, or never.
 function isUnworn(clothing: Clothing, lastWornOn: string | null, date: string) {
   if (lastWornOn) return daysBetween(lastWornOn, date) >= UNWORN_DAYS;
-  return clothing.estimatedWearFrequency !== "weekly" && clothing.estimatedWearFrequency !== "monthly";
+  const assumed = clothing.estimatedWearFrequency && ASSUMED_DAYS_SINCE_WORN[clothing.estimatedWearFrequency];
+  return assumed === null || assumed === undefined || assumed >= UNWORN_DAYS;
 }
 
 // Per clothing id, the date of its latest 착용 기록.
@@ -356,21 +371,8 @@ function usualLooks(records: WearRecord[], clothes: Clothing[], from: string) {
   return { colors: top(colors), styles: top(styles) };
 }
 
-// The Monday of the week `date` is in (YYYY-MM-DD).
-function weekStart(date: string) {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return shift(date, -((day + 6) % 7));
-}
-
 function seasonOf(date: string): Season {
   return SEASON_OF_MONTH[Number(date.slice(5, 7)) - 1];
-}
-
-// `date` moved by `days` (YYYY-MM-DD).
-function shift(date: string, days: number) {
-  const moved = new Date(`${date}T00:00:00Z`);
-  moved.setUTCDate(moved.getUTCDate() + days);
-  return moved.toISOString().slice(0, 10);
 }
 
 function unique<T>(values: T[]) {

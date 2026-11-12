@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
+import { stylingFormality } from "@/lib/outfit/analysis";
 import { verdictSentence } from "@/lib/outfit/analysis-sentences";
 import { SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { todayInKorea } from "@/lib/outfit/dates";
@@ -34,7 +35,6 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
   }
 
   const wantsOutfits = item.remedies.includes("styling-outfits");
-  const formality = item.verdict.kind === "cause" && item.verdict.cause.type === "situation" ? item.verdict.cause.formality : null;
   const outfits =
     wantsOutfits && user.homeRegion
       ? await getOutfitRecommender().stylingOutfits({
@@ -42,7 +42,7 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
           clothingId: id,
           date: todayInKorea(),
           location: { latitude: user.homeRegion.latitude, longitude: user.homeRegion.longitude },
-          formality,
+          formality: stylingFormality(item),
         })
       : [];
 

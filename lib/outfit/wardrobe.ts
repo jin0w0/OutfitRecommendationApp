@@ -61,6 +61,16 @@ export type Color = (typeof COLORS)[number];
 export const ESTIMATED_WEAR_FREQUENCIES = ["weekly", "monthly", "rarely", "new"] as const;
 export type EstimatedWearFrequency = (typeof ESTIMATED_WEAR_FREQUENCIES)[number];
 
+// How many days ago a piece with no 착용 기록 is taken to have been worn, by
+// its 추정 착용 빈도. A new piece counts as never worn (null). The 추천
+// scores by it; the 옷장 분석 decides 안 입는 옷 by it.
+export const ASSUMED_DAYS_SINCE_WORN: Record<EstimatedWearFrequency, number | null> = {
+  weekly: 3,
+  monthly: 15,
+  rarely: 60,
+  new: null,
+};
+
 // What describes a piece, as the user confirms it when registering.
 export type ClothingFields = {
   name: string;

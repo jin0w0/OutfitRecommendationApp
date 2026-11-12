@@ -5,7 +5,7 @@ import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
 import { daysBetween, todayInKorea } from "./dates";
-import type { Clothing, EstimatedWearFrequency, Formality, Slot, Wardrobe } from "./wardrobe";
+import { ASSUMED_DAYS_SINCE_WORN, type Clothing, type Formality, type Slot, type Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
@@ -183,15 +183,6 @@ const OUTER_BELOW = 17;
 
 // How many 활용 코디 are made at most.
 const STYLING_OUTFITS = 3;
-
-// How many days ago a piece with no 착용 기록 is taken to have been worn, by
-// its 추정 착용 빈도. A new piece counts as never worn.
-const ESTIMATED_DAYS_SINCE_WORN: Record<EstimatedWearFrequency, number | null> = {
-  weekly: 3,
-  monthly: 15,
-  rarely: 60,
-  new: null,
-};
 
 export function createOutfitRecommender({
   wardrobe,
@@ -649,7 +640,7 @@ export function createOutfitRecommender({
     }
     const estimated = new Set<string>();
     for (const clothing of await wardrobe.clothes(userId)) {
-      const days = clothing.estimatedWearFrequency && ESTIMATED_DAYS_SINCE_WORN[clothing.estimatedWearFrequency];
+      const days = clothing.estimatedWearFrequency && ASSUMED_DAYS_SINCE_WORN[clothing.estimatedWearFrequency];
       if (daysSinceWorn.has(clothing.id) || days === null || days === undefined) continue;
       daysSinceWorn.set(clothing.id, days);
       estimated.add(clothing.id);

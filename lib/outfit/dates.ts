@@ -15,6 +15,19 @@ export function koreaDate(moment: Date) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(moment);
 }
 
+// `date` moved by `days` (YYYY-MM-DD).
+export function addDays(date: string, days: number) {
+  const moved = new Date(`${date}T00:00:00Z`);
+  moved.setUTCDate(moved.getUTCDate() + days);
+  return moved.toISOString().slice(0, 10);
+}
+
+// The Monday of the week `date` is in (YYYY-MM-DD).
+export function weekStart(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return addDays(date, -((day + 6) % 7));
+}
+
 // Whole days from `from` to `to` (both YYYY-MM-DD).
 export function daysBetween(from: string, to: string) {
   return (Date.parse(to) - Date.parse(from)) / 86_400_000;
