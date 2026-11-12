@@ -119,6 +119,7 @@ export function ClothingForm({
       <Choice label="두께" values={WARMTHS} names={WARMTH_NAMES} value={draft.warmth} onChange={(v) => set("warmth", v)} />
       <Choice
         label="소재"
+        hint="여러 소재가 섞였으면 가장 많이 들어간 소재를 골라 주세요. 라벨을 모르면 겉에서 가장 많이 보이는 소재로요."
         values={MATERIALS}
         names={MATERIAL_NAMES}
         value={draft.material}
@@ -156,10 +157,11 @@ export function ClothingForm({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm font-medium">{label}</span>
+      {hint && <span className="text-xs text-zinc-500">{hint}</span>}
       {children}
     </div>
   );
@@ -168,19 +170,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // A select over a value list; "" stands for not chosen yet.
 function Choice<T extends string | number>({
   label,
+  hint,
   values,
   names,
   value,
   onChange,
 }: {
   label: string;
+  hint?: string;
   values: readonly T[];
   names: Record<T, string>;
   value: T | null;
   onChange: (value: T | null) => void;
 }) {
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       <select
         value={value ?? ""}
         onChange={(event) => onChange(values.find((v) => String(v) === event.target.value) ?? null)}

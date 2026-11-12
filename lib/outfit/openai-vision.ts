@@ -16,7 +16,7 @@ const INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자가 올�
 - style: casual 캐주얼, minimal 미니멀, classic 클래식, street 스트리트, sporty 스포티.
 - formality: casual 캐주얼, semi-formal 세미 포멀, formal 포멀.
 - warmth: 두께. 1 얇음, 2 보통, 3 두꺼움.
-- material: 겉으로 보이는 소재.
+- material: 주 소재 하나. 여러 소재가 섞였으면 가장 많이 들어간 소재를 고르고, 라벨이 보이지 않으면 겉에서 가장 넓게 보이는 소재를 고른다(예: 폴리에스터와 울이 섞인 슬랙스는 더 많이 보이는 쪽).
 사진만으로 확신할 수 없는 필드는 추측하지 말고 null로 둔다.`;
 
 const nullable = (values: readonly (string | number)[]) => ({
