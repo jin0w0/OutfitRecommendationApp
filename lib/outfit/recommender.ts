@@ -4,7 +4,7 @@
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
-import { todayInKorea } from "./dates";
+import { daysBetween, todayInKorea } from "./dates";
 import type { Clothing, EstimatedWearFrequency, Formality, Slot, Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
@@ -634,10 +634,6 @@ function outfitKey(outfit: Outfit) {
     .map((c) => c.id)
     .sort()
     .join();
-}
-
-function daysBetween(from: string, to: string) {
-  return (Date.parse(to) - Date.parse(from)) / 86_400_000;
 }
 
 // 종일 일정 first, then by start time.

@@ -21,6 +21,9 @@ export default function Wardrobe() {
         <Link href="/wardrobe/new" className="rounded-full bg-foreground px-5 py-2 text-background">
           옷 등록하기
         </Link>
+        <Link href="/wardrobe/analysis" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+          옷장 분석
+        </Link>
         <Link href="/wardrobe/tidied" className="text-sm text-zinc-600 underline dark:text-zinc-400">
           정리한 옷 보기
         </Link>

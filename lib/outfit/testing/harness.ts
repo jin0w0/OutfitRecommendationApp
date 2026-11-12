@@ -18,6 +18,7 @@ import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
 import { createCloset } from "../closet";
+import { createWardrobeAnalysis } from "../analysis";
 import { FakeClothingVision, FakePhotoStorage } from "./fake-closet";
 
 // A recommender over a real 옷장, 착용 기록 and 일정 판단 수정값 in an in-process Postgres, next
@@ -51,6 +52,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   const photos = new FakePhotoStorage();
   const vision = new FakeClothingVision();
   const closet = createCloset({ wardrobe, photos, vision });
+  const analysis = createWardrobeAnalysis({ wardrobe, wearRecords, today: () => today });
 
   const signedIn = new Map<string, Headers>();
 
@@ -72,10 +74,14 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   async function addClothes(
     userId: string,
     clothes: (Partial<NewClothing> &
-      Pick<NewClothing, "name" | "slot"> & { estimatedWearFrequency?: EstimatedWearFrequency })[],
+      Pick<NewClothing, "name" | "slot"> & {
+        estimatedWearFrequency?: EstimatedWearFrequency;
+        // YYYY-MM-DD the piece was registered on; today's real date otherwise.
+        registeredOn?: string;
+      })[],
   ) {
     const added = [];
-    for (const { estimatedWearFrequency, ...clothing } of clothes) {
+    for (const { estimatedWearFrequency, registeredOn, ...clothing } of clothes) {
       added.push(
         await wardrobe.addClothing(userId, {
           color: "black",
@@ -85,7 +91,10 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
           warmth: 2,
           material: "cotton",
           ...clothing,
-        }, estimatedWearFrequency && { estimatedWearFrequency }),
+        }, {
+          ...(estimatedWearFrequency && { estimatedWearFrequency }),
+          ...(registeredOn && { registeredAt: new Date(`${registeredOn}T12:00:00+09:00`) }),
+        }),
       );
     }
     return added;
@@ -98,6 +107,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     llm,
     recommender,
     closet,
+    analysis,
     photos,
     vision,
     createUser,

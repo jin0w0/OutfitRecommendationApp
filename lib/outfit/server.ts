@@ -18,9 +18,23 @@ import { createRecommendationSessions } from "./recommendation-sessions";
 import { createCloset, type Closet } from "./closet";
 import { createNeonPhotoStorage } from "./neon-photo-storage";
 import { createOpenAiClothingVision } from "./openai-vision";
+import { createWardrobeAnalysis, type WardrobeAnalysis } from "./analysis";
 
 let instance: OutfitRecommender | undefined;
 let closetInstance: Closet | undefined;
+let analysisInstance: WardrobeAnalysis | undefined;
+
+// The app's single 옷장 분석 module, over the 옷장 and 착용 기록 in Neon.
+export function getWardrobeAnalysis(): WardrobeAnalysis {
+  if (!analysisInstance) {
+    const dialect = new PostgresDialect({ pool: new Pool({ connectionString: requiredEnv("DATABASE_URL") }) });
+    analysisInstance = createWardrobeAnalysis({
+      wardrobe: createWardrobe({ dialect }),
+      wearRecords: createWearRecords({ dialect }),
+    });
+  }
+  return analysisInstance;
+}
 
 function requiredEnv(name: string) {
   const value = process.env[name];

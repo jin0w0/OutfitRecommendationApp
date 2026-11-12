@@ -87,6 +87,8 @@ export type NewClothing = ClothingFields;
 export type Registration = {
   photoKey?: string;
   estimatedWearFrequency?: EstimatedWearFrequency;
+  // When it was registered; now unless given (tests and imports set it).
+  registeredAt?: Date;
 };
 
 export type Preferences = { colors: Color[]; styles: Style[] };
@@ -203,6 +205,7 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
           seasons: JSON.stringify(clothing.seasons),
           photo_key: registration?.photoKey ?? null,
           estimated_wear_frequency: registration?.estimatedWearFrequency ?? null,
+          ...(registration?.registeredAt && { created_at: registration.registeredAt }),
         })
         .execute();
       return {
@@ -238,6 +241,16 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
         .where("id", "=", clothingId)
         .executeTakeFirst();
       return Number(result.numUpdatedRows) > 0;
+    },
+
+    // When each of the user's clothes was registered, by clothing id.
+    async registeredAt(userId: string): Promise<Map<string, Date>> {
+      const rows = await db
+        .selectFrom("clothing")
+        .select(["id", "created_at"])
+        .where("user_id", "=", userId)
+        .execute();
+      return new Map(rows.map((row) => [row.id, row.created_at]));
     },
 
     // Where a piece's photo is kept, if it is the user's and has one.
