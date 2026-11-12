@@ -4,6 +4,7 @@ import type { PurchaseOutfit } from "@/lib/outfit/recommender";
 import type { Clothing, Slot } from "@/lib/outfit/wardrobe";
 import { ClothingPhoto } from "./clothing-photo";
 import { dismissPieceSuggestion, restoreSuggestedClothing } from "./wardrobe/analysis/actions";
+import { PendingButton } from "./pending-button";
 
 const SLOT_ORDER: Slot[] = ["outer", "top", "bottom", "dress", "shoes"];
 
@@ -65,9 +66,9 @@ export function PurchaseOutfitCard({
               <form action={dismissPieceSuggestion}>
                 <input type="hidden" name="suggestionId" value={suggestionId(dismissFor, clothing)} />
                 <input type="hidden" name="returnTo" value={returnTo} />
-                <button type="submit" className="text-xs text-zinc-500 underline">
+                <PendingButton pending="다른 옷을 찾는 중…" className="text-xs text-zinc-500 underline">
                   관심 없어요
-                </button>
+                </PendingButton>
               </form>
             )}
           </div>

@@ -1,4 +1,4 @@
-import type { AdviserPreferences, PieceAdviser, PieceTarget } from "../one-more-piece";
+import type { AdviserPreferences, AvoidedPiece, PieceAdviser, PieceTarget } from "../one-more-piece";
 
 // The LLM's 한 벌 후보, answering what the test prepared every time it is asked.
 export class FakePieceAdviser implements PieceAdviser {
@@ -9,6 +9,8 @@ export class FakePieceAdviser implements PieceAdviser {
   targets: PieceTarget[] = [];
   // The preferences every request came with.
   preferencesSeen: AdviserPreferences[] = [];
+  // What each proposePieces request asked not to propose again.
+  avoidSeen: AvoidedPiece[][] = [];
   private failure: Error | null = null;
   // How many times the LLM was asked.
   calls = 0;
@@ -31,8 +33,17 @@ export class FakePieceAdviser implements PieceAdviser {
     this.failure = error;
   }
 
-  async proposePieces({ target, preferences }: { target: PieceTarget; preferences: AdviserPreferences }) {
+  async proposePieces({
+    target,
+    preferences,
+    avoid = [],
+  }: {
+    target: PieceTarget;
+    preferences: AdviserPreferences;
+    avoid?: AvoidedPiece[];
+  }) {
     this.calls++;
+    this.avoidSeen.push(avoid);
     this.preferencesSeen.push(preferences);
     this.targets.push(target);
     if (this.failure) throw this.failure;

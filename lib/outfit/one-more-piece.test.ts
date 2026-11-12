@@ -162,4 +162,58 @@ describe("관심 없어요", () => {
     ]);
     expect(await pieces.reviving(jun, junTop.id)).toHaveLength(2);
   });
+
+  // 민지 with no shoes, shown three shoes that each make a 코디.
+  async function minjiWithoutShoes() {
+    const outfit = await createTestOutfit({ today: "2026-11-10" });
+    const userId = await outfit.createUser("minji@gmail.com");
+    await outfit.addClothes(userId, [
+      { name: "흰 티", slot: "top", color: "white", style: "street" },
+      { name: "검정 바지", slot: "bottom", color: "black", style: "street" },
+    ]);
+    const fill = () => outfit.pieces.filling(userId, "shoes");
+    return { ...outfit, userId, fill };
+  }
+  const shoes = (name: string, color: ClothingFields["color"]) => candidate({ name, slot: "shoes", color });
+  const names = (suggestions: Awaited<ReturnType<Awaited<ReturnType<typeof minjiWithoutShoes>>["fill"]>>) =>
+    suggestions.map((s) => (s.kind === "new" ? s.piece.name : s.clothing.name));
+
+  test("a dismissed suggestion's place is filled by a new one the LLM proposes, not like the dismissed", async () => {
+    const { pieces, pieceAdviser, userId, fill } = await minjiWithoutShoes();
+    pieceAdviser.willPropose([shoes("흰 스니커즈", "white"), shoes("검정 로퍼", "black"), shoes("회색 운동화", "gray")]);
+    const [white] = await fill();
+    pieceAdviser.willPropose([shoes("베이지 스니커즈", "beige")]);
+
+    await pieces.dismiss(userId, white.id);
+
+    expect(names(await fill())).toEqual(["검정 로퍼", "회색 운동화", "베이지 스니커즈"]);
+    expect(pieceAdviser.avoidSeen.at(-1)).toContainEqual(expect.objectContaining({ slot: "shoes", color: "white" }));
+  });
+
+  test("while saved candidates still fill the list, the LLM is not asked again", async () => {
+    const { pieces, pieceAdviser, userId, fill } = await minjiWithoutShoes();
+    pieceAdviser.willPropose([
+      shoes("흰 스니커즈", "white"),
+      shoes("검정 로퍼", "black"),
+      shoes("회색 운동화", "gray"),
+      shoes("베이지 스니커즈", "beige"),
+    ]);
+    const [white] = await fill();
+
+    await pieces.dismiss(userId, white.id);
+
+    expect(names(await fill())).toEqual(["검정 로퍼", "회색 운동화", "베이지 스니커즈"]);
+    expect(pieceAdviser.calls).toBe(1);
+  });
+
+  test("when the LLM fails to propose more, the dismissal still holds", async () => {
+    const { pieces, pieceAdviser, userId, fill } = await minjiWithoutShoes();
+    pieceAdviser.willPropose([shoes("흰 스니커즈", "white"), shoes("검정 로퍼", "black")]);
+    const [white] = await fill();
+    pieceAdviser.failWith();
+
+    await pieces.dismiss(userId, white.id);
+
+    expect(names(await fill())).toEqual(["검정 로퍼"]);
+  });
 });

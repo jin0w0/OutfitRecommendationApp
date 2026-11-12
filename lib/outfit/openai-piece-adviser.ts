@@ -2,7 +2,7 @@
 // It only proposes; the 이 한 벌 제안 module checks every value and decides by
 // the score rules which candidates count. Not tested automatically.
 import OpenAI from "openai";
-import type { AdviserPreferences, DayConditions, PieceAdviser, PieceTarget } from "./one-more-piece";
+import type { AdviserPreferences, AvoidedPiece, DayConditions, PieceAdviser, PieceTarget } from "./one-more-piece";
 import type { ClothingFields } from "./wardrobe";
 import { COLORS, FORMALITIES, MATERIALS, SEASONS, SLOTS, STYLES, WARMTHS } from "./wardrobe";
 
@@ -12,6 +12,7 @@ target이 day이고 request가 있으면 사용자가 대화로 요청한 조건
 wardrobe는 사용자가 가진 옷, preferences는 좋아하는 색(colors)과 스타일(styles), 사용자의 성별(gender: male 남성, female 여성, null 알 수 없음)이다. 성별을 알면 그 성별에 맞는 옷만 제안한다. male이면 원피스(dress)는 절대 제안하지 않는다.
 - 서로 다른 후보 6벌을 제안한다. 색이나 종류가 서로 겹치지 않게 한다.
 - 사용자가 이미 가진 옷과 같은 옷(같은 종류·색·격식)은 제안하지 않는다.
+- avoid에 있는 옷(사용자가 관심 없다고 했거나 이미 제안한 옷)과 같은 종류·색의 옷은 제안하지 않는다.
 - 무난하고 흔히 구할 수 있는 기본 아이템을 우선한다. 무채색(검정, 흰색, 회색, 네이비, 베이지, 갈색)은 다른 색과 잘 어울린다.
 - name은 "베이지 치노 팬츠"처럼 색과 구체적인 아이템을 담은 짧은 한국어 이름이다.
 - 각 필드는 정해진 값 중에서만 고른다. 두께 warmth는 1 얇음, 2 보통, 3 두꺼움이다.`;
@@ -71,16 +72,18 @@ export function createOpenAiPieceAdviser({ apiKey, model = "gpt-5-mini" }: { api
       target,
       wardrobe,
       preferences,
+      avoid = [],
     }: {
       target: PieceTarget;
       wardrobe: ClothingFields[];
       preferences: AdviserPreferences;
+      avoid?: AvoidedPiece[];
     }) {
       const response = await client.responses.create({
         model,
         reasoning: { effort: "low" },
         instructions: INSTRUCTIONS,
-        input: JSON.stringify({ target, wardrobe, preferences }),
+        input: JSON.stringify({ target, wardrobe, preferences, avoid }),
         text: { format: { type: "json_schema", name: "piece_candidates", schema: SCHEMA, strict: true } },
       });
       return (JSON.parse(response.output_text) as { candidates: unknown[] }).candidates;

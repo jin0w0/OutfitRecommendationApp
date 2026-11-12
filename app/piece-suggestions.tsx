@@ -2,6 +2,7 @@ import { COLOR_NAMES, COLOR_SWATCHES } from "@/lib/outfit/clothing-names";
 import type { PieceSuggestion } from "@/lib/outfit/one-more-piece";
 import Link from "next/link";
 import { dismissPieceSuggestion, restoreSuggestedClothing } from "./wardrobe/analysis/actions";
+import { PendingButton } from "./pending-button";
 
 // 이 한 벌 제안 cards: pieces the 옷장 lacks (or a 정리한 옷 to restore), each
 // with the new 코디 it would bring. `returnTo` is where restoring comes back.
@@ -55,9 +56,9 @@ export function PieceSuggestionCards({
                   <form action={dismissPieceSuggestion}>
                     <input type="hidden" name="suggestionId" value={suggestion.id} />
                     <input type="hidden" name="returnTo" value={returnTo} />
-                    <button type="submit" className="text-zinc-500 underline">
+                    <PendingButton pending="다른 옷을 찾는 중…" className="text-zinc-500 underline">
                       관심 없어요
-                    </button>
+                    </PendingButton>
                   </form>
                 </div>
               )}

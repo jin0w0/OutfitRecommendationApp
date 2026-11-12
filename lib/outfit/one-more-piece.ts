@@ -42,12 +42,17 @@ export type PieceTarget =
 // 성별 (null when not chosen).
 export type AdviserPreferences = Preferences & { gender: Gender | null };
 
+// What a piece the LLM should not propose again looks like: one dismissed
+// (관심 없어요) or already among the candidates.
+export type AvoidedPiece = Pick<ClothingFields, "slot" | "color" | "style" | "formality">;
+
 // The 한 벌 후보 어댑터: candidate pieces for the target, unchecked.
 export type PieceAdviser = {
   proposePieces(request: {
     target: PieceTarget;
     wardrobe: ClothingFields[];
     preferences: AdviserPreferences;
+    avoid?: AvoidedPiece[];
   }): Promise<unknown[]>;
   // Whole 코디 of pieces the user does not have, for the day: each { pieces }.
   proposeOutfits(request: { day: DayConditions; preferences: AdviserPreferences }): Promise<unknown[]>;
@@ -72,29 +77,46 @@ export function createPieceSuggestions({
   return {
     // The pieces that would bring the user's piece `clothingId` back into
     // use (for 조합 부족).
-    async reviving(userId: string, clothingId: string): Promise<PieceSuggestion[]> {
-      const clothes = await wardrobe.clothes(userId);
-      const piece = clothes.find((c) => c.id === clothingId);
-      if (!piece) return [];
-      return suggest(userId, clothingId, { revive: fieldsOf(piece) }, (candidate) => {
-        if (candidate.slot === piece.slot) return 0;
-        return newOutfits(clothes, candidate, (outfit) => outfit.some((c) => c.id === piece.id));
-      });
-    },
+    reviving: (userId: string, clothingId: string) => suggestionsFor(userId, clothingId),
 
     // The pieces of the 종류 `slot` that would let the 옷장 make 코디 (for 구성 불가).
-    async filling(userId: string, slot: Slot): Promise<PieceSuggestion[]> {
-      const clothes = await wardrobe.clothes(userId);
-      return suggest(userId, `slot:${slot}`, { fill: slot }, (candidate) =>
-        candidate.slot === slot ? newOutfits(clothes, candidate, () => true) : 0,
-      );
-    },
+    filling: (userId: string, slot: Slot) => suggestionsFor(userId, `slot:${slot}`),
 
     // 관심 없어요: the suggestion `suggestionId` is hidden for DISMISS_DAYS.
+    // When that leaves fewer suggestions than are shown, the LLM is asked for
+    // more, unlike those dismissed or proposed already, to fill the place.
     async dismiss(userId: string, suggestionId: string) {
       await store.dismiss(userId, suggestionId, addDays(today(), DISMISS_DAYS));
+      await suggestionsFor(userId, targetKeyOf(suggestionId), true);
     },
   };
+
+  // The suggestions for a target key: a clothing id (reviving that piece) or
+  // "slot:<종류>" (filling it). With `topUp`, asks the LLM for more when
+  // there are too few.
+  async function suggestionsFor(userId: string, targetKey: string, topUp = false): Promise<PieceSuggestion[]> {
+    const clothes = await wardrobe.clothes(userId);
+    if (targetKey.startsWith("slot:")) {
+      const slot = targetKey.slice("slot:".length) as Slot;
+      return suggest(
+        userId,
+        targetKey,
+        { fill: slot },
+        (candidate) => (candidate.slot === slot ? newOutfits(clothes, candidate, () => true) : 0),
+        topUp,
+      );
+    }
+    const piece = clothes.find((c) => c.id === targetKey);
+    if (!piece) return [];
+    return suggest(
+      userId,
+      targetKey,
+      { revive: fieldsOf(piece) },
+      (candidate) =>
+        candidate.slot === piece.slot ? 0 : newOutfits(clothes, candidate, (outfit) => outfit.some((c) => c.id === piece.id)),
+      topUp,
+    );
+  }
 
   // The checked candidates for the target, as suggestions: those bringing
   // enough new 코디 (`brings` counts them), most first, one per 종류 and color,
@@ -105,6 +127,7 @@ export function createPieceSuggestions({
     targetKey: string,
     target: PieceTarget,
     brings: (candidate: ClothingFields) => number,
+    topUp = false,
   ): Promise<PieceSuggestion[]> {
     const [clothes, tidied, preferences, gender, dismissed] = await Promise.all([
       wardrobe.clothes(userId),
@@ -136,7 +159,32 @@ export function createPieceSuggestions({
       );
     }
     // Most new 코디 first; equals keep the LLM's order.
-    return suggestions.sort((a, b) => b.newOutfits - a.newOutfits).slice(0, MAX_SUGGESTIONS);
+    const shown = suggestions.sort((a, b) => b.newOutfits - a.newOutfits).slice(0, MAX_SUGGESTIONS);
+    if (!topUp || shown.length >= MAX_SUGGESTIONS) return shown;
+
+    // Too few: more candidates, added to those saved, then suggested anew.
+    const fingerprint = fingerprintOf(clothes, tidied, gender);
+    const avoid: AvoidedPiece[] = [
+      ...[...dismissed].flatMap((id) => {
+        const [key, slot, color, style, formality] = id.split("|");
+        return key === targetKey ? [{ slot, color, style, formality } as AvoidedPiece] : [];
+      }),
+      ...candidates.map(({ slot, color, style, formality }) => ({ slot, color, style, formality })),
+    ];
+    try {
+      const more = await adviser.proposePieces({
+        target,
+        wardrobe: clothes.map(fieldsOf),
+        preferences: { ...preferences, gender },
+        avoid,
+      });
+      const saved = (await store.candidates(userId, targetKey, fingerprint)) ?? [];
+      await store.saveCandidates(userId, targetKey, fingerprint, [...saved, ...more]);
+    } catch (error) {
+      console.error("Could not get more 한 벌 후보 from the LLM", error);
+      return shown;
+    }
+    return suggest(userId, targetKey, target, brings);
   }
 
   // The LLM's checked candidates for the target: saved ones while the 옷장 is
@@ -175,6 +223,11 @@ function newOutfits(clothes: Clothing[], candidate: ClothingFields, counts: (out
   return candidateOutfits(withIt, needsOuter)
     .map((outfit) => Object.values(outfit))
     .filter((items) => items.includes(virtual) && counts(items) && isWellMatched(items)).length;
+}
+
+// The target key a suggestion id starts with.
+function targetKeyOf(suggestionId: string) {
+  return suggestionId.split("|")[0];
 }
 
 // What names a suggestion for 관심 없어요: the target (for reviving a piece,
