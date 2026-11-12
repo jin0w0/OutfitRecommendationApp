@@ -2,7 +2,7 @@ import { GENDER_NAMES, COLOR_NAMES, STYLE_NAMES } from "@/lib/outfit/clothing-na
 import { GENDERS, COLORS, STYLES, type Gender, type Preferences } from "@/lib/outfit/wardrobe";
 import { savePreferences, skipPreferences } from "./actions";
 
-// 선호 색상·스타일, and in settings the 성별 too. On onboarding it can be skipped.
+// 성별 and 선호 색상·스타일. On onboarding it can be skipped.
 export function PreferencesForm({
   current,
   next,
@@ -13,20 +13,18 @@ export function PreferencesForm({
   return (
     <form action={savePreferences} className="flex flex-col gap-4">
       <input type="hidden" name="next" value={next} />
-      {next === "/settings" && (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-sm font-medium">성별</legend>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {GENDERS.map((gender) => (
-              <label key={gender} className="flex items-center gap-1 text-sm">
-                <input type="radio" name="gender" value={gender} defaultChecked={current.gender === gender} />
-                {GENDER_NAMES[gender]}
-              </label>
-            ))}
-          </div>
-          <p className="text-xs text-zinc-500">새 옷을 추천할 때 성별에 맞는 옷으로 골라 드려요.</p>
-        </fieldset>
-      )}
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-sm font-medium">성별</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {GENDERS.map((gender) => (
+            <label key={gender} className="flex items-center gap-1 text-sm">
+              <input type="radio" name="gender" value={gender} defaultChecked={current.gender === gender} />
+              {GENDER_NAMES[gender]}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-zinc-500">새 옷을 추천할 때 성별에 맞는 옷으로 골라 드려요.</p>
+      </fieldset>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-medium">좋아하는 색상</legend>
         <div className="flex flex-wrap gap-x-4 gap-y-2">

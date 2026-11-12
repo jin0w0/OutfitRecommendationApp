@@ -31,9 +31,10 @@ function PreferencesStep() {
   return (
     <>
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">어떤 색과 스타일을 좋아하세요?</h1>
+        <h1 className="text-2xl font-semibold">어떤 옷을 추천해 드릴까요?</h1>
         <p className="text-zinc-600 dark:text-zinc-400">
-          고른 색과 스타일이 들어간 코디를 더 추천해 드려요. 나중에 설정에서 바꿀 수 있어요.
+          성별에 맞는 새 옷을 제안하고, 고른 색과 스타일이 들어간 코디를 더 추천해 드려요. 나중에 설정에서 바꿀 수
+          있어요.
         </p>
       </div>
       <PreferencesForm current={{ colors: [], styles: [], gender: null }} next="/onboarding" />
