@@ -67,14 +67,18 @@ async function Content({ searchParams }: Pick<PageProps<"/home/shopping">, "sear
         </Link>
       </div>
       {result.conversation && <Conversation conversation={result.conversation} />}
-      <Outfits result={result} />
+      <Outfits
+        result={result}
+        returnTo={`/home/shopping?${new URLSearchParams({ date, ...(situation && { situation }), session: result.sessionId })}`}
+      />
       <ChatForm hidden={hidden} notice={notice} />
       <UndoButtons step={result.step} hidden={hidden} />
     </>
   );
 }
 
-function Outfits({ result }: { result: PurchaseRecommendation }) {
+// `returnTo`: this 구매 추천 as it is, for 되돌리기 to come back to.
+function Outfits({ result, returnTo }: { result: PurchaseRecommendation; returnTo: string }) {
   if (result.kind === "unavailable") {
     return <p className="text-zinc-600 dark:text-zinc-400">지금은 구매 추천을 만들 수 없어요. 잠시 뒤에 다시 시도해 주세요.</p>;
   }
@@ -98,7 +102,7 @@ function Outfits({ result }: { result: PurchaseRecommendation }) {
       )}
       <ul className="flex flex-col gap-4">
         {result.outfits.map((item) => (
-          <PurchaseOutfitCard key={item.added.map((a) => a.clothing.id).join()} item={item} returnTo="/home" />
+          <PurchaseOutfitCard key={item.added.map((a) => a.clothing.id).join()} item={item} returnTo={returnTo} />
         ))}
       </ul>
     </>

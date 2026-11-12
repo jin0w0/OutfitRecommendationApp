@@ -89,7 +89,11 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
           suggestions={(
             await Promise.all(recommendation.missingSlots.map((slot) => getPieceSuggestions().filling(user.id, slot)))
           ).flat()}
-          returnTo="/home"
+          returnTo={`/home?${new URLSearchParams({
+            date,
+            ...(situation && { situation }),
+            session: recommendation.sessionId,
+          })}`}
         />
       )}
     </>

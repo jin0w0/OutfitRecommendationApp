@@ -40,10 +40,16 @@ export async function showAnotherWeeklyPick() {
   redirect("/home");
 }
 
-// Back to where an 이 한 벌 제안 card was: its analysis page or the main screen.
+// Back to where an 이 한 벌 제안 or 구매 추천 card was, as it was: its
+// analysis page, or the main screen or 구매 추천 with the date, 일정 and
+// 세션 shown. Only paths of this app's screens; anything else goes to the
+// 옷장 분석.
 function backFromSuggestion(formData: FormData): never {
   const returnTo = String(formData.get("returnTo") ?? "");
-  redirect(returnTo.startsWith("/wardrobe/analysis/") || returnTo === "/home" ? returnTo : "/wardrobe/analysis");
+  const local = returnTo.startsWith("/") && !/^\/[/\\]/.test(returnTo);
+  const { pathname } = new URL(local ? returnTo : "/", "http://app.invalid");
+  const known = pathname === "/home" || pathname === "/home/shopping" || pathname.startsWith("/wardrobe/analysis/");
+  redirect(local && known ? returnTo : "/wardrobe/analysis");
 }
 
 // 이 한 벌 제안의 "되돌려 보세요": back from the 정리한 옷.
