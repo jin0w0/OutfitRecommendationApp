@@ -19,12 +19,17 @@ import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
 import { createCloset } from "../closet";
 import { createWardrobeAnalysis } from "../analysis";
+import { createAnalysisStore } from "../analysis-store";
 import { FakeClothingVision, FakePhotoStorage } from "./fake-closet";
 
 // A recommender over a real 옷장, 착용 기록 and 일정 판단 수정값 in an in-process Postgres, next
 // to the account tables so clothes belong to real users. `today` is the date
-// the recommender takes as today (YYYY-MM-DD).
+// the recommender takes as today (YYYY-MM-DD); setToday moves it.
 export async function createTestOutfit({ today = "2026-11-10" }: { today?: string } = {}) {
+  let current = today;
+  const setToday = (date: string) => {
+    current = date;
+  };
   const { account, google, dialect, signInWithGoogle } = await createTestAccount();
   await account.migrate();
   const wardrobe = createWardrobe({ dialect });
@@ -46,13 +51,21 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     wearRecords,
     eventCorrections,
     sessions,
-    today: () => today,
+    today: () => current,
   });
 
   const photos = new FakePhotoStorage();
   const vision = new FakeClothingVision();
   const closet = createCloset({ wardrobe, photos, vision });
-  const analysis = createWardrobeAnalysis({ wardrobe, wearRecords, sessions, today: () => today });
+  const analysisStore = createAnalysisStore({ dialect });
+  await analysisStore.migrate();
+  const analysis = createWardrobeAnalysis({
+    wardrobe,
+    wearRecords,
+    sessions,
+    store: analysisStore,
+    today: () => current,
+  });
 
   const signedIn = new Map<string, Headers>();
 
@@ -108,6 +121,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     recommender,
     closet,
     analysis,
+    setToday,
     photos,
     vision,
     createUser,

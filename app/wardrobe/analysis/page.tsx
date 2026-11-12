@@ -4,10 +4,12 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getAccount } from "@/lib/account/server";
 import type { UnwornClothing } from "@/lib/outfit/analysis";
-import { verdictSentence } from "@/lib/outfit/analysis-sentences";
+import { CARE_TIPS, verdictSentence } from "@/lib/outfit/analysis-sentences";
+import { ANSWERS, type Answer } from "@/lib/outfit/analysis-store";
 import { daysBetween, todayInKorea } from "@/lib/outfit/dates";
 import { getWardrobeAnalysis } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../clothing-photo";
+import { answerAboutClothing, keepClothingAsIs, tidyFromAnalysis } from "./actions";
 
 export default function WardrobeAnalysis() {
   return (
@@ -56,7 +58,49 @@ function UnwornCard({ item }: { item: UnwornClothing }) {
           {lastWornOn ? `${daysBetween(lastWornOn, todayInKorea())}일 전에 입었어요` : "아직 입은 기록이 없어요"}
         </span>
         <p className="text-sm">{verdictSentence(item)}</p>
+        {item.verdict.kind === "ask" && <AnswerButtons clothingId={clothing.id} />}
+        {item.remedies.includes("care-tips") && (
+          <p className="rounded-md bg-zinc-50 p-2 text-sm dark:bg-zinc-900">{CARE_TIPS[clothing.material]}</p>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
+          {item.remedies.includes("tidy-suggestion") && (
+            <form action={tidyFromAnalysis}>
+              <input type="hidden" name="clothingId" value={clothing.id} />
+              <button type="submit" className="rounded-full border border-zinc-300 px-3 py-1 dark:border-zinc-700">
+                정리하기
+              </button>
+            </form>
+          )}
+          <form action={keepClothingAsIs}>
+            <input type="hidden" name="clothingId" value={clothing.id} />
+            <button type="submit" className="text-zinc-500 underline">
+              그대로 둘게요
+            </button>
+          </form>
+        </div>
       </div>
     </li>
+  );
+}
+
+const ANSWER_LABELS: Record<Answer, string> = {
+  care: "관리가 번거로워요",
+  "changed-mind": "더 이상 마음에 안 들어요",
+  forgot: "그냥 잊고 있었어요",
+};
+
+function AnswerButtons({ clothingId }: { clothingId: string }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {ANSWERS.map((answer) => (
+        <form key={answer} action={answerAboutClothing}>
+          <input type="hidden" name="clothingId" value={clothingId} />
+          <input type="hidden" name="answer" value={answer} />
+          <button type="submit" className="rounded-full bg-zinc-100 px-3 py-1 text-sm dark:bg-zinc-800">
+            {ANSWER_LABELS[answer]}
+          </button>
+        </form>
+      ))}
+    </div>
   );
 }

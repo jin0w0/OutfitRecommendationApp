@@ -19,6 +19,7 @@ import { createCloset, type Closet } from "./closet";
 import { createNeonPhotoStorage } from "./neon-photo-storage";
 import { createOpenAiClothingVision } from "./openai-vision";
 import { createWardrobeAnalysis, type WardrobeAnalysis } from "./analysis";
+import { createAnalysisStore } from "./analysis-store";
 
 let instance: OutfitRecommender | undefined;
 let closetInstance: Closet | undefined;
@@ -32,6 +33,7 @@ export function getWardrobeAnalysis(): WardrobeAnalysis {
       wardrobe: createWardrobe({ dialect }),
       wearRecords: createWearRecords({ dialect }),
       sessions: createRecommendationSessions({ dialect }),
+      store: createAnalysisStore({ dialect }),
     });
   }
   return analysisInstance;

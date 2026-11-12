@@ -6,6 +6,9 @@ import { candidateOutfits, colorHarmony, styleConsistency, type Basis } from "./
 import type { Color, Clothing, Formality, Season, Style, Wardrobe } from "./wardrobe";
 import type { WearRecord, WearRecords } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
+import { ANSWERS, type Answer, type AnalysisStore } from "./analysis-store";
+
+export type { Answer } from "./analysis-store";
 
 // Not worn for this many days makes a piece 안 입는 옷.
 const UNWORN_DAYS = 30;
@@ -23,6 +26,8 @@ const ENOUGH_COMBINATIONS = 2;
 // most worn colors and styles count.
 const USUAL_DAYS = 90;
 const USUAL_TOP = 3;
+// How long 그대로 두기 keeps a piece out of the analysis.
+const KEEP_DAYS = 90;
 
 // The season each month is in, Korea's calendar.
 const SEASON_OF_MONTH: Season[] = [
@@ -46,7 +51,11 @@ export type Cause =
   | { type: "taste"; usualColors: Color[]; usualStyles: Style[] };
 
 // What was made of one 안 입는 옷.
-export type Verdict = { kind: "new" } | { kind: "ask" } | { kind: "cause"; cause: Cause };
+export type Verdict =
+  | { kind: "new" }
+  | { kind: "ask" }
+  | { kind: "answered"; answer: Answer }
+  | { kind: "cause"; cause: Cause };
 
 // What the user is offered for it.
 export type Remedy = "styling-outfits" | "season-reminder" | "care-tips" | "tidy-suggestion";
@@ -65,11 +74,13 @@ export function createWardrobeAnalysis({
   wardrobe,
   wearRecords,
   sessions,
+  store,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "registeredAt" | "preferences">;
   wearRecords: Pick<WearRecords, "wornBefore">;
   sessions: Pick<RecommendationSessions, "firstStepsBetween">;
+  store: AnalysisStore;
   // YYYY-MM-DD in Korea.
   today?: () => string;
 }) {
@@ -77,12 +88,14 @@ export function createWardrobeAnalysis({
     // 분석하기: the user's 안 입는 옷, the longest unworn first.
     async analyze(userId: string): Promise<UnwornClothing[]> {
       const date = today();
-      const [clothes, registeredAt, preferences, worn, firstSteps] = await Promise.all([
+      const [clothes, registeredAt, preferences, worn, firstSteps, answers, keptUntil] = await Promise.all([
         wardrobe.clothes(userId),
         wardrobe.registeredAt(userId),
         wardrobe.preferences(userId),
         wearRecords.wornBefore(userId, date),
         sessions.firstStepsBetween<{ basis: Basis | null }>(userId, shift(date, -SITUATION_DAYS), date),
+        store.answers(userId),
+        store.keptUntil(userId),
       ]);
       const lastWorn = lastWornOn(worn);
       const facts: Facts = {
@@ -98,9 +111,14 @@ export function createWardrobeAnalysis({
       const unworn = clothes.flatMap((clothing) => {
         const lastWornOn = lastWorn.get(clothing.id) ?? null;
         if (!isUnworn(clothing, lastWornOn, date)) return [];
+        const kept = keptUntil.get(clothing.id);
+        if (kept && date < kept) return [];
         const registered = registeredAt.get(clothing.id);
         const age = registered ? daysBetween(koreaDate(registered), date) : Infinity;
-        const verdict = age < NEW_DAYS ? ({ kind: "new" } as const) : diagnose(clothing, facts);
+        // An answer holds until the piece is worn after it.
+        const answered = answers.get(clothing.id);
+        const answer = answered && (!lastWornOn || lastWornOn <= answered.answeredOn) ? answered.answer : null;
+        const verdict: Verdict = age < NEW_DAYS ? { kind: "new" } : diagnose(clothing, facts, answer);
         return [
           {
             clothing,
@@ -124,7 +142,26 @@ export function createWardrobeAnalysis({
       });
       return unworn.map(({ registeredOn, ...item }) => (void registeredOn, item));
     },
+
+    // 답하기: why the user does not wear a piece the data said nothing about.
+    async answer(userId: string, clothingId: string, answer: Answer) {
+      if (!ANSWERS.includes(answer)) throw new Error("Unknown answer");
+      await requireOwn(userId, clothingId);
+      await store.saveAnswer(userId, clothingId, answer, today());
+    },
+
+    // 그대로 두기: out of the analysis for KEEP_DAYS.
+    async keepAsIs(userId: string, clothingId: string) {
+      await requireOwn(userId, clothingId);
+      await store.keep(userId, clothingId, shift(today(), KEEP_DAYS));
+    },
   };
+
+  async function requireOwn(userId: string, clothingId: string) {
+    if (!(await wardrobe.clothes(userId)).some((c) => c.id === clothingId)) {
+      throw new Error("No such piece for this user");
+    }
+  }
 }
 
 export type WardrobeAnalysis = ReturnType<typeof createWardrobeAnalysis>;
@@ -140,15 +177,17 @@ type Facts = {
   usual: { colors: Color[]; styles: Style[] };
 };
 
-// The first 원인 that holds, in order of how sure it is; else the user is asked.
-function diagnose(clothing: Clothing, facts: Facts): Verdict {
+// The first 원인 that holds, in order of how sure it is; else what the user
+// answered, or else they are asked.
+function diagnose(clothing: Clothing, facts: Facts, answer: Answer | null): Verdict {
   const cause =
     seasonMismatch(clothing, facts) ??
     situationMismatch(clothing, facts) ??
     substitute(clothing, facts) ??
     lackingCombinations(clothing, facts) ??
     offTaste(clothing, facts);
-  return cause ? { kind: "cause", cause } : { kind: "ask" };
+  if (cause) return { kind: "cause", cause };
+  return answer ? { kind: "answered", answer } : { kind: "ask" };
 }
 
 function seasonMismatch(clothing: Clothing, { season }: Facts): Cause | null {
@@ -204,8 +243,16 @@ function offTaste(clothing: Clothing, { liked, usual }: Facts): Cause | null {
   return { type: "taste", usualColors: usual.colors, usualStyles: usual.styles };
 }
 
+const ANSWER_REMEDIES: Record<Answer, Remedy[]> = {
+  care: ["care-tips", "tidy-suggestion"],
+  "changed-mind": ["tidy-suggestion"],
+  forgot: ["styling-outfits"],
+};
+
 function remediesFor(verdict: Verdict): Remedy[] {
-  if (verdict.kind !== "cause") return ["styling-outfits"];
+  if (verdict.kind === "new") return ["styling-outfits"];
+  if (verdict.kind === "ask") return [];
+  if (verdict.kind === "answered") return ANSWER_REMEDIES[verdict.answer];
   switch (verdict.cause.type) {
     case "season":
       return ["season-reminder"];
