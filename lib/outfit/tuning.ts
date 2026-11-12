@@ -15,23 +15,36 @@ const REASON_FACTOR: Partial<Record<RejectionReason, Factor>> = {
   event: "event",
 };
 
-// How much one 거절 makes its factor weigh, and the bounds of any factor.
+// How much one 거절 makes its factor weigh, and one 수락 each factor of its
+// 추천 이유; and the bounds of any factor.
 const REJECTION_STEP = 1.1;
+const ACCEPTANCE_STEP = 1.05;
 const MIN_MULTIPLIER = 0.5;
 const MAX_MULTIPLIER = 2;
 
 export type Multipliers = Record<Factor, number>;
 
-// Each factor's weight as a multiple of its default, from the 거절 counted.
-export function multipliersFrom(rejections: { reason: RejectionReason | null }[]): Multipliers {
-  const counts = new Map<Factor, number>();
+// Each factor's weight as a multiple of its default, from the 거절 and
+// 수락 counted.
+export function multipliersFrom({
+  rejections,
+  acceptances,
+}: {
+  rejections: { reason: RejectionReason | null }[];
+  acceptances: { factors: string[] }[];
+}): Multipliers {
+  const rejected = new Map<Factor, number>();
   for (const { reason } of rejections) {
     const factor = reason && REASON_FACTOR[reason];
-    if (factor) counts.set(factor, (counts.get(factor) ?? 0) + 1);
+    if (factor) rejected.set(factor, (rejected.get(factor) ?? 0) + 1);
+  }
+  const accepted = new Map<string, number>();
+  for (const { factors } of acceptances) {
+    for (const factor of factors) accepted.set(factor, (accepted.get(factor) ?? 0) + 1);
   }
   const multipliers = {} as Multipliers;
   for (const factor of Object.keys(DEFAULT_WEIGHTS) as Factor[]) {
-    const raw = REJECTION_STEP ** (counts.get(factor) ?? 0);
+    const raw = REJECTION_STEP ** (rejected.get(factor) ?? 0) * ACCEPTANCE_STEP ** (accepted.get(factor) ?? 0);
     const bounded = Math.min(MAX_MULTIPLIER, Math.max(MIN_MULTIPLIER, raw));
     // Rounded so 1.1 reads as 1.1, not 1.1000000000000001.
     multipliers[factor] = Math.round(bounded * 10_000) / 10_000;

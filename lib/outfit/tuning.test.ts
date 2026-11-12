@@ -92,3 +92,58 @@ describe("추천 맞춤: 거절", () => {
     await expect(reject("too-expensive" as never)).rejects.toThrow();
   });
 });
+
+describe("추천 맞춤: 수락", () => {
+  async function minjiShownAnOutfit() {
+    const outfit = await minji();
+    const shown = await outfit.recommender.recommendForDate({
+      userId: outfit.userId,
+      date: DATE,
+      situation: null,
+      location: SEOUL,
+    });
+    if (shown.status !== "ok") throw new Error("expected a 코디");
+    const clothingIds = Object.values(shown.outfit).map((c) => c.id);
+    const reasonFactors = shown.reasons.map((r) => r.evidence.factor);
+    const accept = (sessionId: string | undefined = shown.sessionId) =>
+      outfit.recommender.accept({ userId: outfit.userId, date: DATE, clothingIds, sessionId });
+    return { ...outfit, shown, reasonFactors, accept };
+  }
+
+  test("accepting a 코디 makes each factor of its 추천 이유 1.05 times as important", async () => {
+    const { accept, reasonFactors, multipliers } = await minjiShownAnOutfit();
+
+    await accept();
+
+    const expected = { ...ALL_ONE };
+    for (const factor of reasonFactors) expected[factor] = 1.05;
+    expect(await multipliers()).toEqual(expected);
+  });
+
+  test("accepting the same date again counts once", async () => {
+    const { accept, reasonFactors, multipliers } = await minjiShownAnOutfit();
+
+    await accept();
+    await accept();
+
+    expect((await multipliers())[reasonFactors[0]]).toBe(1.05);
+  });
+
+  test("cancelling the acceptance takes it back", async () => {
+    const { recommender, userId, accept, multipliers } = await minjiShownAnOutfit();
+    await accept();
+
+    await recommender.cancelAcceptance({ userId, date: DATE });
+
+    expect(await multipliers()).toEqual(ALL_ONE);
+  });
+
+  test("an acceptance without its 추천 세션 changes nothing", async () => {
+    const { recommender, userId, shown, multipliers } = await minjiShownAnOutfit();
+    if (shown.status !== "ok") return;
+
+    await recommender.accept({ userId, date: DATE, clothingIds: Object.values(shown.outfit).map((c) => c.id) });
+
+    expect(await multipliers()).toEqual(ALL_ONE);
+  });
+});

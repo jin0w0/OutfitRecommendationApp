@@ -455,13 +455,34 @@ export function createOutfitRecommender({
 
     // "입을게요": the user will wear these clothes on `date`. Replaces any 코디
     // already accepted for that date. Only clothes from the user's 옷장.
-    async accept({ userId, date, clothingIds }: { userId: string; date: string; clothingIds: string[] }) {
+    // With the 추천 세션 it came from, the factors of the accepted 코디's 추천
+    // 이유 count toward 추천 맞춤, once per date.
+    async accept({
+      userId,
+      date,
+      clothingIds,
+      sessionId,
+    }: {
+      userId: string;
+      date: string;
+      clothingIds: string[];
+      sessionId?: string;
+    }) {
       const owned = new Set((await wardrobe.clothes(userId)).map((c) => c.id));
       if (!clothingIds.length || !clothingIds.every((id) => owned.has(id))) {
         throw new Error("Only clothes from the user's 옷장 can be accepted");
       }
       const status: WearStatus = date <= today() ? "worn" : "planned";
       await wearRecords.save(userId, { date, status, clothingIds });
+
+      const last = sessionId && (await sessions.get<Step>(userId, sessionId))?.steps.at(-1);
+      const sameOutfit =
+        last && last.status === "ok" && sameIds(Object.values(last.outfit).map((c) => c.id), clothingIds);
+      if (sameOutfit) {
+        await tuning.saveAcceptance(userId, date, last.reasons.map((r) => r.evidence.factor));
+      } else {
+        await tuning.removeAcceptance(userId, date);
+      }
     },
 
     // 일정 판단 직접 고치기: from now on the user's 일정 `eventId` (a calendar
@@ -523,7 +544,7 @@ export function createOutfitRecommender({
 
     // 추천 맞춤 보기: each factor's weight as a multiple of its default.
     async tuning(userId: string): Promise<{ multipliers: Multipliers }> {
-      return { multipliers: multipliersFrom(await tuning.rejectionsSinceReset(userId)) };
+      return { multipliers: await userMultipliers(userId) };
     },
 
     // 추천 맞춤 되돌리기: back to the default weights.
@@ -534,6 +555,7 @@ export function createOutfitRecommender({
     // 수락 취소: forgets the 착용 기록 or plan for `date`.
     async cancelAcceptance({ userId, date }: { userId: string; date: string }) {
       await wearRecords.remove(userId, date);
+      await tuning.removeAcceptance(userId, date);
     },
 
     // The user's 캘린더 연동 is gone: drops what was kept about their calendar
@@ -624,6 +646,15 @@ export function createOutfitRecommender({
   // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
   // 격식 수준: the clothes are chosen at that one, but are not said to suit
   // the 일정 better than they do.
+  // The user's 추천 맞춤, from their 거절 and 수락 since the last reset.
+  async function userMultipliers(userId: string) {
+    const [rejections, acceptances] = await Promise.all([
+      tuning.rejectionsSinceReset(userId),
+      tuning.acceptancesSinceReset(userId),
+    ]);
+    return multipliersFrom({ rejections, acceptances });
+  }
+
   async function scoringFacts(userId: string, day: FoundDay): Promise<ScoringFacts> {
     const { events, baseEvent, basis, weather, date } = day;
     return {
@@ -635,7 +666,7 @@ export function createOutfitRecommender({
       ),
       weather,
       preferences: await wardrobe.preferences(userId),
-      weights: weightsFrom(multipliersFrom(await tuning.rejectionsSinceReset(userId))),
+      weights: weightsFrom(await userMultipliers(userId)),
       ...(await daysSinceLastWorn(userId, date)),
     };
   }
@@ -703,6 +734,10 @@ function outfitsUnder(
       (!color || Object.values(outfit).some((c) => hasColorDirection(c.color, color.direction))),
   );
   return { clothes, candidates };
+}
+
+function sameIds(a: string[], b: string[]) {
+  return a.length === b.length && [...a].sort().join() === [...b].sort().join();
 }
 
 // The 수정 조건 a 고정 추천 starts with.

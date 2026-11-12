@@ -79,7 +79,12 @@ export async function undoRevision(formData: FormData) {
 export async function acceptOutfit(formData: FormData) {
   const userId = await requireUserId();
   const clothingIds = formData.getAll("clothing").map(String);
-  await getOutfitRecommender().accept({ userId, date: formDate(formData), clothingIds });
+  await getOutfitRecommender().accept({
+    userId,
+    date: formDate(formData),
+    clothingIds,
+    sessionId: sessionFrom(formData) ?? undefined,
+  });
   backHome(formData, sessionFrom(formData));
 }
 
