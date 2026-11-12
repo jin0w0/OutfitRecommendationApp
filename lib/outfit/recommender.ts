@@ -9,7 +9,7 @@ import {
   ASSUMED_DAYS_SINCE_WORN,
   type Clothing,
   type ClothingFields,
-  suitsLine,
+  suitsGender,
   type Formality,
   type Slot,
   type Wardrobe,
@@ -248,7 +248,7 @@ export function createOutfitRecommender({
   pieceStore,
   today = todayInKorea,
 }: {
-  wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "tidiedClothes" | "preferences" | "clothingLine">;
+  wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "tidiedClothes" | "preferences" | "gender">;
   weather: WeatherSource;
   calendar: CalendarSource;
   llm: LanguageModel;
@@ -625,7 +625,7 @@ export function createOutfitRecommender({
         dislikedNow(userId),
       ]);
       const fixed = clothes.find((c) => c.id === fixedClothingId) ?? null;
-      const fingerprint = fingerprintOf(clothes, tidied, preferences.line);
+      const fingerprint = fingerprintOf(clothes, tidied, preferences.gender);
       const dayKey = `${date}:${formality ?? "any"}`;
       const dayPieces = () =>
         cachedCandidates(userId, `day:${dayKey}`, fingerprint, () =>
@@ -637,7 +637,7 @@ export function createOutfitRecommender({
         );
       const choose = async (pool: ClothingFields[], conditions: PurchaseCondition[], exactlyOne: boolean) =>
         choosePurchaseOutfits({
-          line: preferences.line,
+          gender: preferences.gender,
           owned: clothes,
           tidied,
           pool,
@@ -669,7 +669,7 @@ export function createOutfitRecommender({
         );
         const whole = (raw ?? [])
           .flatMap((o) => wholeOutfit(o) ?? [])
-          .filter((o) => Object.values(o).every((p) => suitsLine(p.slot, preferences.line))).slice(0, PURCHASE_OUTFITS);
+          .filter((o) => Object.values(o).every((p) => suitsGender(p.slot, preferences.gender))).slice(0, PURCHASE_OUTFITS);
         pool = mergedPool([], whole.flatMap((o) => Object.values(o)));
         result = raw ? { kind: "all-new", outfits: whole.map(allNewOutfit) } : { kind: "unavailable" };
       } else {
@@ -717,14 +717,14 @@ export function createOutfitRecommender({
       ]);
       const piece = clothes.find((c) => c.id === clothingId);
       if (!piece) return [];
-      const raw = await cachedCandidates(userId, piece.id, fingerprintOf(clothes, tidied, preferences.line), () =>
+      const raw = await cachedCandidates(userId, piece.id, fingerprintOf(clothes, tidied, preferences.gender), () =>
         pieceAdviser.proposePieces({ target: { revive: fieldsOf(piece) }, wardrobe: clothes.map(fieldsOf), preferences }),
       );
       if (!raw) return null;
       // Only the weather: no 일정, so neither the calendar nor the LLM.
       const day = weatherOnlyDay(date, location, await weatherSource.forecast({ date, ...location }).catch(() => null));
       return choosePurchaseOutfits({
-        line: preferences.line,
+        gender: preferences.gender,
         owned: clothes,
         tidied,
         pool: checkedPieces(raw).filter((c) => !dismissed.has(suggestionId(piece.id, c))),
@@ -792,7 +792,7 @@ export function createOutfitRecommender({
       const scoreOf = await scorer(userId, day);
       const choose = (pool: ClothingFields[]) =>
         choosePurchaseOutfits({
-          line: preferences.line,
+          gender: preferences.gender,
           owned, tidied, pool, conditions, formality, weather: day.weather, disliked, scoreOf });
 
       let pool = last.pool;
@@ -1004,8 +1004,8 @@ export function createOutfitRecommender({
 
   // What the LLM is told of the user's taste for new pieces.
   async function adviserPreferences(userId: string) {
-    const [preferences, line] = await Promise.all([wardrobe.preferences(userId), wardrobe.clothingLine(userId)]);
-    return { ...preferences, line };
+    const [preferences, gender] = await Promise.all([wardrobe.preferences(userId), wardrobe.gender(userId)]);
+    return { ...preferences, gender };
   }
 
   // The LLM's candidates under `key`: saved ones while the 옷장 is as it was,

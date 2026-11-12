@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
-import { CLOTHING_LINES, type ClothingLine, type Preferences } from "@/lib/outfit/wardrobe";
+import { GENDERS, type Gender, type Preferences } from "@/lib/outfit/wardrobe";
 
 export async function signOut() {
   const requestHeaders = await headers();
@@ -61,8 +61,8 @@ export async function savePreferences(formData: FormData) {
     colors: formData.getAll("color").map(String) as Preferences["colors"],
     styles: formData.getAll("style").map(String) as Preferences["styles"],
   });
-  const line = formData.get("line");
-  if (CLOTHING_LINES.includes(line as ClothingLine)) await getCloset().setClothingLine(user.id, line as ClothingLine);
+  const gender = formData.get("gender");
+  if (GENDERS.includes(gender as Gender)) await getCloset().setGender(user.id, gender as Gender);
   if (formData.get("next") === "/settings") redirect("/settings");
   await account.passPreferencesStep(requestHeaders);
   redirect("/onboarding");
@@ -86,11 +86,11 @@ export async function setTiltOff(formData: FormData) {
   redirect("/settings");
 }
 
-// 추천받을 옷 구분, from the card on the main screen.
-export async function saveClothingLine(formData: FormData) {
+// 성별, from the card on the main screen.
+export async function saveGender(formData: FormData) {
   const user = await getAccount().getCurrentUser(await headers());
   if (!user) redirect("/");
-  await getCloset().setClothingLine(user.id, String(formData.get("line")) as ClothingLine);
+  await getCloset().setGender(user.id, String(formData.get("gender")) as Gender);
   redirect("/home");
 }
 

@@ -35,45 +35,45 @@ async function jihoon() {
 const addedSlots = (result: Awaited<ReturnType<Awaited<ReturnType<typeof jihoon>>["shop"]>>) =>
   result.kind === "unavailable" ? [] : result.outfits.flatMap((o) => o.added.map((a) => a.clothing.slot));
 
-describe("추천받을 옷 구분 저장", () => {
+describe("성별 저장", () => {
   test("none until chosen, then what was chosen", async () => {
     const { closet, userId } = await jihoon();
 
-    expect(await closet.clothingLine(userId)).toBeNull();
-    await closet.setClothingLine(userId, "menswear");
+    expect(await closet.gender(userId)).toBeNull();
+    await closet.setGender(userId, "male");
 
-    expect(await closet.clothingLine(userId)).toBe("menswear");
+    expect(await closet.gender(userId)).toBe("male");
     expect(await closet.preferences(userId)).toEqual({ colors: [], styles: [] });
   });
 
   test("choosing it keeps the 선호 색상·스타일, and saving those keeps it", async () => {
     const { closet, userId } = await jihoon();
     await closet.setPreferences(userId, { colors: ["navy"], styles: ["casual"] });
-    await closet.setClothingLine(userId, "womenswear");
+    await closet.setGender(userId, "female");
     await closet.setPreferences(userId, { colors: ["black"], styles: [] });
 
     expect(await closet.preferences(userId)).toEqual({ colors: ["black"], styles: [] });
-    expect(await closet.clothingLine(userId)).toBe("womenswear");
+    expect(await closet.gender(userId)).toBe("female");
   });
 
   test("a value outside the list is refused", async () => {
     const { closet, userId } = await jihoon();
 
-    await expect(closet.setClothingLine(userId, "kidswear" as never)).rejects.toThrow();
+    await expect(closet.setGender(userId, "kidswear" as never)).rejects.toThrow();
   });
 });
 
-describe("남성복: no 원피스 among new pieces", () => {
+describe("남성: no 원피스 among new pieces", () => {
   test("구매 추천 leaves out a new 원피스, and the LLM is told", async () => {
     const { closet, pieceAdviser, userId, shop } = await jihoon();
-    await closet.setClothingLine(userId, "menswear");
+    await closet.setGender(userId, "male");
     pieceAdviser.willPropose([BEIGE_DRESS, BEIGE_PANTS]);
 
     const result = await shop();
 
     expect(addedSlots(result)).not.toContain("dress");
     expect(addedSlots(result).length).toBeGreaterThan(0);
-    expect(pieceAdviser.preferencesSeen.at(-1)).toMatchObject({ line: "menswear" });
+    expect(pieceAdviser.preferencesSeen.at(-1)).toMatchObject({ gender: "male" });
   });
 
   test("without a choice a new 원피스 may be suggested", async () => {
@@ -86,7 +86,7 @@ describe("남성복: no 원피스 among new pieces", () => {
   test("whole new 코디 with a 원피스 are left out", async () => {
     const outfit = await createTestOutfit({ today: DATE });
     const userId = await outfit.createUser("jihoon@gmail.com");
-    await outfit.closet.setClothingLine(userId, "menswear");
+    await outfit.closet.setGender(userId, "male");
     outfit.pieceAdviser.willProposeOutfits([
       { pieces: [BEIGE_DRESS, WHITE_SNEAKERS] },
       { pieces: [NAVY_CARDIGAN, BEIGE_PANTS, WHITE_SNEAKERS] },
@@ -102,7 +102,7 @@ describe("남성복: no 원피스 among new pieces", () => {
 
   test("\"원피스로\" in 구매 대화 finds none", async () => {
     const { closet, pieceAdviser, llm, recommender, userId, shop } = await jihoon();
-    await closet.setClothingLine(userId, "menswear");
+    await closet.setGender(userId, "male");
     pieceAdviser.willPropose([BEIGE_PANTS]);
     pieceAdviser.willProposeForRequest([BEIGE_DRESS]);
     const first = await shop();
@@ -115,7 +115,7 @@ describe("남성복: no 원피스 among new pieces", () => {
 
   test("한 벌만 더하면 and 이 한 벌 제안 leave out a 원피스", async () => {
     const { closet, pieceAdviser, pieces, recommender, userId, owned } = await jihoon();
-    await closet.setClothingLine(userId, "menswear");
+    await closet.setGender(userId, "male");
     pieceAdviser.willPropose([BEIGE_DRESS, BEIGE_PANTS, WHITE_SNEAKERS]);
     const shirt = owned[0];
 

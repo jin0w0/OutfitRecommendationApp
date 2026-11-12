@@ -103,15 +103,15 @@ export type Registration = {
 
 export type Preferences = { colors: Color[]; styles: Style[] };
 
-// 추천받을 옷 구분: whether new pieces are suggested from menswear or
-// womenswear. Null until the user chooses, which filters nothing.
-export const CLOTHING_LINES = ["menswear", "womenswear"] as const;
-export type ClothingLine = (typeof CLOTHING_LINES)[number];
+// The user's 성별, which new pieces are suggested for. Null until the user
+// chooses, which filters nothing.
+export const GENDERS = ["male", "female"] as const;
+export type Gender = (typeof GENDERS)[number];
 
-// Whether a new piece of `slot` may be suggested under the 추천받을 옷 구분:
-// never a 원피스 for menswear. Owned clothes are never filtered.
-export function suitsLine(slot: Slot, line: ClothingLine | null) {
-  return line !== "menswear" || slot !== "dress";
+// Whether a new piece of `slot` may be suggested for the 성별: never a 원피스
+// for a man. Owned clothes are never filtered.
+export function suitsGender(slot: Slot, gender: Gender | null) {
+  return gender !== "male" || slot !== "dress";
 }
 
 type Tables = {
@@ -139,7 +139,7 @@ type Tables = {
     user_id: string;
     colors: JSONColumnType<Color[]>;
     styles: JSONColumnType<Style[]>;
-    clothing_line: Generated<ClothingLine | null>;
+    gender: Generated<Gender | null>;
   };
 };
 
@@ -214,8 +214,8 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
         .addColumn("colors", "jsonb", (c) => c.notNull())
         .addColumn("styles", "jsonb", (c) => c.notNull())
         .execute();
-      // Added with 추천받을 옷 구분.
-      await sql`alter table clothing_preference add column if not exists clothing_line text`.execute(db);
+      // Added with 성별.
+      await sql`alter table clothing_preference add column if not exists gender text`.execute(db);
     },
 
     async addClothing(userId: string, clothing: NewClothing, registration?: Registration): Promise<Clothing> {
@@ -337,21 +337,21 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
       return row ?? { colors: [], styles: [] };
     },
 
-    async setClothingLine(userId: string, line: ClothingLine) {
+    async setGender(userId: string, gender: Gender) {
       await db
         .insertInto("clothing_preference")
-        .values({ user_id: userId, colors: JSON.stringify([]), styles: JSON.stringify([]), clothing_line: line })
-        .onConflict((oc) => oc.column("user_id").doUpdateSet({ clothing_line: line }))
+        .values({ user_id: userId, colors: JSON.stringify([]), styles: JSON.stringify([]), gender: gender })
+        .onConflict((oc) => oc.column("user_id").doUpdateSet({ gender: gender }))
         .execute();
     },
 
-    async clothingLine(userId: string): Promise<ClothingLine | null> {
+    async gender(userId: string): Promise<Gender | null> {
       const row = await db
         .selectFrom("clothing_preference")
-        .select("clothing_line")
+        .select("gender")
         .where("user_id", "=", userId)
         .executeTakeFirst();
-      return row?.clothing_line ?? null;
+      return row?.gender ?? null;
     },
   };
 }

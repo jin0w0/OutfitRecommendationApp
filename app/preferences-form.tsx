@@ -1,25 +1,25 @@
-import { CLOTHING_LINE_NAMES, COLOR_NAMES, STYLE_NAMES } from "@/lib/outfit/clothing-names";
-import { CLOTHING_LINES, COLORS, STYLES, type ClothingLine, type Preferences } from "@/lib/outfit/wardrobe";
+import { GENDER_NAMES, COLOR_NAMES, STYLE_NAMES } from "@/lib/outfit/clothing-names";
+import { GENDERS, COLORS, STYLES, type Gender, type Preferences } from "@/lib/outfit/wardrobe";
 import { savePreferences, skipPreferences } from "./actions";
 
-// 추천받을 옷 구분 and 선호 색상·스타일. On onboarding it can be skipped.
+// 성별 and 선호 색상·스타일. On onboarding it can be skipped.
 export function PreferencesForm({
   current,
   next,
 }: {
-  current: Preferences & { line: ClothingLine | null };
+  current: Preferences & { gender: Gender | null };
   next: "/onboarding" | "/settings";
 }) {
   return (
     <form action={savePreferences} className="flex flex-col gap-4">
       <input type="hidden" name="next" value={next} />
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 text-sm font-medium">추천받을 옷</legend>
+        <legend className="mb-1 text-sm font-medium">성별</legend>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {CLOTHING_LINES.map((line) => (
-            <label key={line} className="flex items-center gap-1 text-sm">
-              <input type="radio" name="line" value={line} defaultChecked={current.line === line} />
-              {CLOTHING_LINE_NAMES[line]}
+          {GENDERS.map((gender) => (
+            <label key={gender} className="flex items-center gap-1 text-sm">
+              <input type="radio" name="gender" value={gender} defaultChecked={current.gender === gender} />
+              {GENDER_NAMES[gender]}
             </label>
           ))}
         </div>

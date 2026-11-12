@@ -9,10 +9,10 @@ import type { PieceStore } from "./one-more-piece-store";
 import type { PieceRequest } from "./purchase";
 import { candidateOutfits, isWellMatched } from "./scoring";
 import {
-  suitsLine,
+  suitsGender,
   type Clothing,
   type ClothingFields,
-  type ClothingLine,
+  type Gender,
   type Formality,
   type Preferences,
   type Slot,
@@ -39,8 +39,8 @@ export type PieceTarget =
   | { day: DayConditions; request?: PieceRequest };
 
 // What the LLM is told of the user's taste: the 선호 색상·스타일 and the
-// 추천받을 옷 구분 (null when not chosen).
-export type AdviserPreferences = Preferences & { line: ClothingLine | null };
+// 성별 (null when not chosen).
+export type AdviserPreferences = Preferences & { gender: Gender | null };
 
 // The 한 벌 후보 어댑터: candidate pieces for the target, unchecked.
 export type PieceAdviser = {
@@ -64,7 +64,7 @@ export function createPieceSuggestions({
   store,
   today = todayInKorea,
 }: {
-  wardrobe: Pick<Wardrobe, "clothes" | "tidiedClothes" | "preferences" | "clothingLine">;
+  wardrobe: Pick<Wardrobe, "clothes" | "tidiedClothes" | "preferences" | "gender">;
   adviser: PieceAdviser;
   store: PieceStore;
   today?: () => string;
@@ -106,16 +106,16 @@ export function createPieceSuggestions({
     target: PieceTarget,
     brings: (candidate: ClothingFields) => number,
   ): Promise<PieceSuggestion[]> {
-    const [clothes, tidied, preferences, line, dismissed] = await Promise.all([
+    const [clothes, tidied, preferences, gender, dismissed] = await Promise.all([
       wardrobe.clothes(userId),
       wardrobe.tidiedClothes(userId),
       wardrobe.preferences(userId),
-      wardrobe.clothingLine(userId),
+      wardrobe.gender(userId),
       store.dismissedOn(userId, today()),
     ]);
     const candidates = (
-      await candidatesFor(userId, targetKey, target, clothes, tidied, { ...preferences, line })
-    ).filter((candidate) => suitsLine(candidate.slot, line));
+      await candidatesFor(userId, targetKey, target, clothes, tidied, { ...preferences, gender })
+    ).filter((candidate) => suitsGender(candidate.slot, gender));
     const needed = "revive" in target ? TO_REVIVE : TO_FILL;
 
     const suggestions: PieceSuggestion[] = [];
@@ -149,7 +149,7 @@ export function createPieceSuggestions({
     tidied: Clothing[],
     preferences: AdviserPreferences,
   ): Promise<ClothingFields[]> {
-    const fingerprint = fingerprintOf(clothes, tidied, preferences.line);
+    const fingerprint = fingerprintOf(clothes, tidied, preferences.gender);
     let raw = await store.candidates(userId, targetKey, fingerprint);
     if (!raw) {
       try {
@@ -197,14 +197,14 @@ export function fieldsOf({ name, slot, color, seasons, style, formality, warmth,
 }
 
 // Changes whenever a piece is added, changed, 정리 or restored, or the
-// 추천받을 옷 구분 is chosen or changed.
-export function fingerprintOf(clothes: Clothing[], tidied: Clothing[], line: ClothingLine | null = null) {
+// 성별 is chosen or changed.
+export function fingerprintOf(clothes: Clothing[], tidied: Clothing[], gender: Gender | null = null) {
   const describe = (list: Clothing[]) =>
     list
       .map(fieldsOf)
       .map((fields, i) => JSON.stringify([list[i].id, fields]))
       .sort();
   return createHash("sha256")
-    .update(JSON.stringify(line ? [describe(clothes), describe(tidied), line] : [describe(clothes), describe(tidied)]))
+    .update(JSON.stringify(gender ? [describe(clothes), describe(tidied), gender] : [describe(clothes), describe(tidied)]))
     .digest("hex");
 }

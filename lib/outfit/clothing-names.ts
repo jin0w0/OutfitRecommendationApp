@@ -1,5 +1,5 @@
 // What each clothing value is called on screen.
-import type { ClothingLine, Color, EstimatedWearFrequency, Material, Season, Slot } from "./wardrobe";
+import type { Gender, Color, EstimatedWearFrequency, Material, Season, Slot } from "./wardrobe";
 
 export { COLOR_NAMES, STYLE_NAMES } from "./reasons";
 export { FORMALITY_NAMES } from "./situations";
@@ -50,9 +50,9 @@ export const MATERIAL_NAMES: Record<Material, string> = {
   synthetic: "합성섬유",
 };
 
-export const CLOTHING_LINE_NAMES: Record<ClothingLine, string> = {
-  menswear: "남성복",
-  womenswear: "여성복",
+export const GENDER_NAMES: Record<Gender, string> = {
+  male: "남성",
+  female: "여성",
 };
 
 export const WARMTH_NAMES: Record<1 | 2 | 3, string> = { 1: "얇음", 2: "보통", 3: "두꺼움" };

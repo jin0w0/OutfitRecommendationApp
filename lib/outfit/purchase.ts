@@ -9,10 +9,10 @@ import type { Weather } from "./ports";
 import { hasColorDirection, type ColorDirection, type RevisionCondition, type StyleDirection } from "./revision";
 import { candidateOutfits, isWellMatched, type Outfit } from "./scoring";
 import {
-  suitsLine,
+  suitsGender,
   type Clothing,
   type ClothingFields,
-  type ClothingLine,
+  type Gender,
   type Color,
   type Formality,
   type Material,
@@ -221,7 +221,7 @@ export function allNewOutfit(pieces: Partial<Record<Slot, ClothingFields>>, inde
 
 // The 구매 추천 코디 for the day under the 구매 조건: owned clothes with pieces
 // from `pool` added, the best scored first, no two adding the same pieces.
-//   Added pieces suit the 추천받을 옷 구분, even when kept, and are of the day's 격식 수준 and meet the 색·소재 조건, unless
+//   Added pieces suit the 성별, even when kept, and are of the day's 격식 수준 and meet the 색·소재 조건, unless
 //   kept; none is like an owned piece; one like a 정리한 옷 is that 정리한 옷.
 //   With 종류 asked for, exactly those are added; else as few as can be
 //   (just one with `exactlyOne`).
@@ -235,7 +235,7 @@ export function choosePurchaseOutfits({
   disliked,
   scoreOf,
   exactlyOne = false,
-  line = null,
+  gender = null,
 }: {
   owned: Clothing[];
   tidied: Clothing[];
@@ -246,7 +246,7 @@ export function choosePurchaseOutfits({
   disliked: Set<string>;
   scoreOf: (outfit: Outfit) => number;
   exactlyOne?: boolean;
-  line?: ClothingLine | null;
+  gender?: Gender | null;
 }): PurchaseOutfit[] {
   const keptNew = conditions.flatMap((c) => (c.type === "keep" && c.isNew ? [c.clothing] : []));
   const droppedNew = conditions.flatMap((c) => (c.type === "exclude" && c.isNew ? [c.clothing] : []));
@@ -267,7 +267,7 @@ export function choosePurchaseOutfits({
   const added: Clothing[] = [];
   const keptAdded: Clothing[] = [];
   for (const [index, piece] of pool.entries()) {
-    if (owned.some((c) => isLike(c, piece)) || !suitsLine(piece.slot, line)) continue;
+    if (owned.some((c) => isLike(c, piece)) || !suitsGender(piece.slot, gender)) continue;
     const kept = keptNew.some((k) => sameLook(k, piece));
     if (!kept && (droppedNew.some((d) => sameLook(d, piece)) || !meets(piece))) continue;
     const clothing = tidied.find((c) => isLike(c, piece)) ?? virtual(piece, String(index));

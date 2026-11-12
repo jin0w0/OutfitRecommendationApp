@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { ClothingSighting, ClothingVision, Photo, PhotoStorage } from "./closet-ports";
 import {
-  CLOTHING_LINES,
+  GENDERS,
   COLORS,
   ESTIMATED_WEAR_FREQUENCIES,
   FORMALITIES,
@@ -16,7 +16,7 @@ import {
   WARMTHS,
   type Clothing,
   type ClothingFields,
-  type ClothingLine,
+  type Gender,
   type EstimatedWearFrequency,
   type Preferences,
   type Wardrobe,
@@ -163,12 +163,12 @@ export function createCloset({
       await wardrobe.setPreferences(userId, { colors: [...new Set(colors)], styles: [...new Set(styles)] });
     },
 
-    // 추천받을 옷 구분 읽기·저장하기.
-    clothingLine: (userId: string) => wardrobe.clothingLine(userId),
+    // 성별 읽기·저장하기.
+    gender: (userId: string) => wardrobe.gender(userId),
 
-    async setClothingLine(userId: string, line: ClothingLine) {
-      if (!CLOTHING_LINES.includes(line)) throw new Error("The 추천받을 옷 구분 must come from the list");
-      await wardrobe.setClothingLine(userId, line);
+    async setGender(userId: string, gender: Gender) {
+      if (!GENDERS.includes(gender)) throw new Error("The 성별 must come from the list");
+      await wardrobe.setGender(userId, gender);
     },
 
     // 탈퇴: every photo the user ever uploaded, registered or only analysed.
