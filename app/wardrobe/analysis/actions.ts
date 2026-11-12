@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { ANSWERS, type Answer } from "@/lib/outfit/analysis-store";
-import { getCloset, getWardrobeAnalysis } from "@/lib/outfit/server";
+import { getCloset, getPieceSuggestions, getWardrobeAnalysis } from "@/lib/outfit/server";
 
 async function requireUserId() {
   const requestHeaders = await headers();
@@ -40,12 +40,24 @@ export async function showAnotherWeeklyPick() {
   redirect("/home");
 }
 
-// 이 한 벌 제안의 "되돌려 보세요": back from the 정리한 옷, then where it was.
+// Back to where an 이 한 벌 제안 card was: its analysis page or the main screen.
+function backFromSuggestion(formData: FormData): never {
+  const returnTo = String(formData.get("returnTo") ?? "");
+  redirect(returnTo.startsWith("/wardrobe/analysis/") || returnTo === "/home" ? returnTo : "/wardrobe/analysis");
+}
+
+// 이 한 벌 제안의 "되돌려 보세요": back from the 정리한 옷.
 export async function restoreSuggestedClothing(formData: FormData) {
   const userId = await requireUserId();
   await getCloset().restore(userId, String(formData.get("clothingId")));
-  const returnTo = String(formData.get("returnTo") ?? "");
-  redirect(returnTo.startsWith("/wardrobe/analysis/") || returnTo === "/home" ? returnTo : "/wardrobe/analysis");
+  backFromSuggestion(formData);
+}
+
+// 이 한 벌 제안의 "관심 없어요".
+export async function dismissPieceSuggestion(formData: FormData) {
+  const userId = await requireUserId();
+  await getPieceSuggestions().dismiss(userId, String(formData.get("suggestionId")));
+  backFromSuggestion(formData);
 }
 
 // 정리 제안에서 바로 정리하기.

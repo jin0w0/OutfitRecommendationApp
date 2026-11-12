@@ -1,6 +1,6 @@
 # 이 한 벌 제안
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

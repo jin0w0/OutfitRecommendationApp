@@ -4,11 +4,12 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import type { CurrentUser } from "@/lib/account/account";
 import { getAccount } from "@/lib/account/server";
-import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
+import { getCloset, getOutfitRecommender, getPieceSuggestions } from "@/lib/outfit/server";
 import { isEventKind } from "@/lib/outfit/situations";
 import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
 import { WeeklyPick } from "./weekly-pick";
+import { PieceSuggestionCards } from "../piece-suggestions";
 import { OutfitRequestForm, RecommendationView } from "./recommendation";
 import { homeDate, noticeFrom, shownFrom } from "./home-state";
 
@@ -77,6 +78,14 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         shown={shown}
         notice={continued ? noticeFrom(params) : null}
       />
+      {recommendation.status === "unbuildable" && (
+        <PieceSuggestionCards
+          suggestions={(
+            await Promise.all(recommendation.missingSlots.map((slot) => getPieceSuggestions().filling(user.id, slot)))
+          ).flat()}
+          returnTo="/home"
+        />
+      )}
     </>
   );
 }

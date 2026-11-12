@@ -120,3 +120,46 @@ describe("조합 부족인 옷을 살리는 한 벌", () => {
     expect(await pieces.reviving(jun, orangeTop.id)).toEqual([]);
   });
 });
+
+describe("빈 종류를 채우는 한 벌", () => {
+  test("with no shoes, only shoes that make a 코디 are suggested", async () => {
+    const outfit = await createTestOutfit({ today: "2026-11-10" });
+    const userId = await outfit.createUser("minji@gmail.com");
+    await outfit.addClothes(userId, [
+      { name: "흰 티", slot: "top", color: "white", style: "street" },
+      { name: "검정 바지", slot: "bottom", color: "black", style: "street" },
+    ]);
+    const whiteSneakers = candidate({ name: "흰 스니커즈", slot: "shoes", color: "white" });
+    const loudBoots = candidate({ name: "주황 부츠", slot: "shoes", color: "orange", style: "classic" });
+    outfit.pieceAdviser.willPropose([BEIGE_PANTS, loudBoots, whiteSneakers]);
+
+    const suggestions = await outfit.pieces.filling(userId, "shoes");
+
+    expect(suggestions).toEqual([{ id: expect.any(String), kind: "new", piece: whiteSneakers, newOutfits: 1 }]);
+  });
+});
+
+describe("관심 없어요", () => {
+  test("a suggestion the user is not interested in is hidden for 90 days, for them only", async () => {
+    const { pieces, pieceAdviser, setToday, createUser, addClothes, userId, revive } = await minjiWithOrangeTop();
+    pieceAdviser.willPropose([BEIGE_PANTS, NAVY_PANTS]);
+    const [beige] = await revive();
+
+    await pieces.dismiss(userId, beige.id);
+    expect((await revive()).map((s) => s.kind === "new" && s.piece.name)).toEqual(["네이비 카고 팬츠"]);
+
+    setToday("2027-02-08");
+    expect((await revive()).map((s) => s.kind === "new" && s.piece.name)).toEqual([
+      "베이지 와이드 팬츠",
+      "네이비 카고 팬츠",
+    ]);
+
+    const jun = await createUser("jun@gmail.com");
+    const [junTop] = await addClothes(jun, [
+      { name: "주황 티", slot: "top", color: "orange", style: "street" },
+      { name: "검정 스트릿 스니커즈", slot: "shoes", color: "black", style: "street" },
+      { name: "흰 스트릿 스니커즈", slot: "shoes", color: "white", style: "street" },
+    ]);
+    expect(await pieces.reviving(jun, junTop.id)).toHaveLength(2);
+  });
+});
