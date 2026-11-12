@@ -25,7 +25,7 @@ import {
   type RejectionReason,
 } from "./tuning";
 import type { TuningStore } from "./tuning-store";
-import { fieldsOf, fingerprintOf, type DayConditions, type PieceAdviser } from "./one-more-piece";
+import { fieldsOf, fingerprintOf, suggestionId, type DayConditions, type PieceAdviser } from "./one-more-piece";
 import { outfitsUnder } from "./outfits-under";
 import {
   accumulatePurchase,
@@ -41,6 +41,7 @@ import {
   templateReply,
   wholeOutfit,
   type PurchaseCondition,
+  type PurchaseOutfit,
   type PurchaseOutfits,
 } from "./purchase";
 import type { PieceStore } from "./one-more-piece-store";
@@ -372,18 +373,7 @@ export function createOutfitRecommender({
       const piece = clothes.find((c) => c.id === clothingId);
       if (!piece) return [];
       // Only the weather: no 일정, so neither the calendar nor the LLM.
-      const weather = await weatherSource.forecast({ date, ...location }).catch(() => null);
-      const day: FoundDay = {
-        date,
-        situation: null,
-        location,
-        events: [],
-        baseEvent: null,
-        basis: null,
-        weather,
-        weatherPlace: null,
-        missing: [],
-      };
+      const day = weatherOnlyDay(date, location, await weatherSource.forecast({ date, ...location }).catch(() => null));
       const scoring = await scoringFacts(userId, day);
       const { candidates } = outfitsUnder(clothes, day.weather, formality, fixedConditions(piece), await dislikedNow(userId));
       return candidates
@@ -609,16 +599,21 @@ export function createOutfitRecommender({
     // with one new piece each, or, when the 옷장 makes no 코디 for the day,
     // whole new 코디. The LLM proposes; the score rules choose. Starts a 구매
     // 추천 세션 for 구매 대화.
+    // With `fixedClothingId` (구매 추천에서 더 보기), every 코디 has that piece of
+    // the 옷장, as if 구매 대화 had asked to keep it, with as few new pieces as
+    // can be; the candidates are the day's and those for reviving the piece.
     async purchaseOutfits({
       userId,
       date,
       situation,
       location,
+      fixedClothingId,
     }: {
       userId: string;
       date: string;
       situation: EventKind | null;
       location: Coordinates;
+      fixedClothingId?: string;
     }): Promise<PurchaseRecommendation> {
       const day = await findDay(userId, date, situation, location);
       const formality = tilted(day, day.basis?.formality ?? null, await activeTilt(userId));
@@ -628,55 +623,55 @@ export function createOutfitRecommender({
         wardrobe.preferences(userId),
         dislikedNow(userId),
       ]);
+      const fixed = clothes.find((c) => c.id === fixedClothingId) ?? null;
       const fingerprint = fingerprintOf(clothes, tidied);
-      const ask = async (key: string, propose: () => Promise<unknown[]>) => {
-        const saved = await pieceStore.candidates(userId, key, fingerprint);
-        if (saved) return saved;
-        try {
-          const proposed = await propose();
-          await pieceStore.saveCandidates(userId, key, fingerprint, proposed);
-          return proposed;
-        } catch (error) {
-          console.error("Could not get 구매 추천 from the LLM", error);
-          return null;
-        }
-      };
       const dayKey = `${date}:${formality ?? "any"}`;
-
-      let result: PurchaseOutfits;
-      let pool: ClothingFields[] = [];
-      if (!outfitsUnder(clothes, day.weather, formality, [], disliked).candidates.length) {
-        const raw = await ask(`outfits:${dayKey}`, () =>
-          pieceAdviser.proposeOutfits({ day: dayConditions(day, formality), preferences }),
-        );
-        const whole = (raw ?? []).flatMap((o) => wholeOutfit(o) ?? []).slice(0, PURCHASE_OUTFITS);
-        pool = mergedPool([], whole.flatMap((o) => Object.values(o)));
-        result = raw ? { kind: "all-new", outfits: whole.map(allNewOutfit) } : { kind: "unavailable" };
-      } else {
-        const raw = await ask(`day:${dayKey}`, () =>
+      const dayPieces = () =>
+        cachedCandidates(userId, `day:${dayKey}`, fingerprint, () =>
           pieceAdviser.proposePieces({
             target: { day: dayConditions(day, formality) },
             wardrobe: clothes.map(fieldsOf),
             preferences,
           }),
         );
+      const choose = async (pool: ClothingFields[], conditions: PurchaseCondition[], exactlyOne: boolean) =>
+        choosePurchaseOutfits({
+          owned: clothes,
+          tidied,
+          pool,
+          conditions,
+          formality,
+          weather: day.weather,
+          disliked,
+          scoreOf: await scorer(userId, day),
+          exactlyOne,
+        });
+
+      let result: PurchaseOutfits;
+      let pool: ClothingFields[] = [];
+      if (fixed) {
+        const [forDay, forPiece] = await Promise.all([
+          dayPieces(),
+          cachedCandidates(userId, fixed.id, fingerprint, () =>
+            pieceAdviser.proposePieces({ target: { revive: fieldsOf(fixed) }, wardrobe: clothes.map(fieldsOf), preferences }),
+          ),
+        ]);
+        pool = mergedPool(checkedPieces(forPiece ?? []), checkedPieces(forDay ?? []));
+        result =
+          forDay || forPiece
+            ? { kind: "with-wardrobe", outfits: await choose(pool, fixedPurchase(fixed), false) }
+            : { kind: "unavailable" };
+      } else if (!outfitsUnder(clothes, day.weather, formality, [], disliked).candidates.length) {
+        const raw = await cachedCandidates(userId, `outfits:${dayKey}`, fingerprint, () =>
+          pieceAdviser.proposeOutfits({ day: dayConditions(day, formality), preferences }),
+        );
+        const whole = (raw ?? []).flatMap((o) => wholeOutfit(o) ?? []).slice(0, PURCHASE_OUTFITS);
+        pool = mergedPool([], whole.flatMap((o) => Object.values(o)));
+        result = raw ? { kind: "all-new", outfits: whole.map(allNewOutfit) } : { kind: "unavailable" };
+      } else {
+        const raw = await dayPieces();
         pool = checkedPieces(raw ?? []);
-        result = raw
-          ? {
-              kind: "with-wardrobe",
-              outfits: choosePurchaseOutfits({
-                owned: clothes,
-                tidied,
-                pool,
-                conditions: [],
-                formality,
-                weather: day.weather,
-                disliked,
-                scoreOf: await scorer(userId, day),
-                exactlyOne: true,
-              }),
-            }
-          : { kind: "unavailable" };
+        result = raw ? { kind: "with-wardrobe", outfits: await choose(pool, [], true) } : { kind: "unavailable" };
       }
       const first: PurchaseStep = {
         day,
@@ -685,9 +680,56 @@ export function createOutfitRecommender({
         pool,
         result,
         conversation: null,
+        fixed,
       };
       const sessionId = await sessions.start<PurchaseStep>(userId, date, first, "purchase");
       return purchaseView(first, sessionId, 0, null);
+    },
+
+    // 한 벌만 더하면: up to PURCHASE_OUTFITS 구매 추천 코디 with the piece and
+    // one new piece each, for `date` at `location` and, if given, at
+    // `formality`, like 활용 코디. The candidates are 이 한 벌 제안's for
+    // reviving the piece, without those dismissed (관심 없어요). Null when the
+    // LLM failed.
+    async stylingPurchaseOutfits({
+      userId,
+      clothingId,
+      date,
+      location,
+      formality = null,
+    }: {
+      userId: string;
+      clothingId: string;
+      date: string;
+      location: Coordinates;
+      formality?: Formality | null;
+    }): Promise<PurchaseOutfit[] | null> {
+      const [clothes, tidied, preferences, disliked, dismissed] = await Promise.all([
+        wardrobe.clothes(userId),
+        wardrobe.tidiedClothes(userId),
+        wardrobe.preferences(userId),
+        dislikedNow(userId),
+        pieceStore.dismissedOn(userId, today()),
+      ]);
+      const piece = clothes.find((c) => c.id === clothingId);
+      if (!piece) return [];
+      const raw = await cachedCandidates(userId, piece.id, fingerprintOf(clothes, tidied), () =>
+        pieceAdviser.proposePieces({ target: { revive: fieldsOf(piece) }, wardrobe: clothes.map(fieldsOf), preferences }),
+      );
+      if (!raw) return null;
+      // Only the weather: no 일정, so neither the calendar nor the LLM.
+      const day = weatherOnlyDay(date, location, await weatherSource.forecast({ date, ...location }).catch(() => null));
+      return choosePurchaseOutfits({
+        owned: clothes,
+        tidied,
+        pool: checkedPieces(raw).filter((c) => !dismissed.has(suggestionId(piece.id, c))),
+        conditions: fixedPurchase(piece),
+        formality,
+        weather: day.weather,
+        disliked,
+        scoreOf: await scorer(userId, day),
+        exactlyOne: true,
+      });
     },
 
     // 구매 대화: the 구매 추천 of the session's latest step, chosen again as
@@ -733,7 +775,7 @@ export function createOutfitRecommender({
       if (asked.unknownClothing) return unchanged({ reason: "unknown-clothing", message });
       if (!asked.conditions.length) return unchanged({ reason: "off-topic", message });
 
-      const earlier = last.conversation?.conditions ?? [];
+      const earlier = last.conversation?.conditions ?? fixedPurchase(session.steps[0].fixed);
       const conditions = accumulatePurchase(earlier, asked.conditions);
       const { anchor } = session.steps[0];
       const style = asked.conditions.find((c) => c.type === "style");
@@ -953,6 +995,26 @@ export function createOutfitRecommender({
     return multipliersFrom({ rejections, acceptances });
   }
 
+  // The LLM's candidates under `key`: saved ones while the 옷장 is as it was,
+  // else asked anew and saved. Null when the LLM fails.
+  async function cachedCandidates(
+    userId: string,
+    key: string,
+    fingerprint: string,
+    propose: () => Promise<unknown[]>,
+  ): Promise<unknown[] | null> {
+    const saved = await pieceStore.candidates(userId, key, fingerprint);
+    if (saved) return saved;
+    try {
+      const proposed = await propose();
+      await pieceStore.saveCandidates(userId, key, fingerprint, proposed);
+      return proposed;
+    } catch (error) {
+      console.error("Could not get 구매 추천 from the LLM", error);
+      return null;
+    }
+  }
+
   // Each 코디's total score for the day, with the user's 추천 맞춤.
   async function scorer(userId: string, day: FoundDay) {
     const scoring = await scoringFacts(userId, day);
@@ -1085,7 +1147,31 @@ type PurchaseStep = {
   pool: ClothingFields[];
   result: PurchaseOutfits;
   conversation: PurchaseConversation | null;
+  // The piece of the 옷장 the 구매 추천 was asked to keep (구매 추천에서 더
+  // 보기), which every later step keeps too until 구매 대화 says otherwise.
+  // Absent in sessions from before it existed.
+  fixed?: Clothing | null;
 };
+
+// The 구매 조건 a 구매 추천 with a fixed piece starts with.
+function fixedPurchase(fixed: Clothing | null | undefined): PurchaseCondition[] {
+  return fixed ? [{ type: "keep", clothing: fixed, isNew: false }] : [];
+}
+
+// A day known only by its weather (활용 코디, 한 벌만 더하면).
+function weatherOnlyDay(date: string, location: Coordinates, weather: Weather | null): FoundDay {
+  return {
+    date,
+    situation: null,
+    location,
+    events: [],
+    baseEvent: null,
+    basis: null,
+    weather,
+    weatherPlace: null,
+    missing: [],
+  };
+}
 
 // One 구매 대화 turn: what was said, every 구매 조건 so far, and the 비서 답장.
 export type PurchaseConversation = { message: string; conditions: PurchaseCondition[]; reply: string };
@@ -1106,6 +1192,8 @@ export type PurchaseRecommendation = PurchaseOutfits & {
   step: number;
   conversation: PurchaseConversation | null;
   unapplied: PurchaseUnapplied | null;
+  // The piece the first 구매 추천 was asked to keep, on that step only.
+  fixed: Clothing | null;
 };
 
 function purchaseView(
@@ -1114,7 +1202,15 @@ function purchaseView(
   index: number,
   unapplied: PurchaseUnapplied | null,
 ): PurchaseRecommendation {
-  return { ...step.result, date: step.day.date, sessionId, step: index, conversation: step.conversation, unapplied };
+  return {
+    ...step.result,
+    date: step.day.date,
+    sessionId,
+    step: index,
+    conversation: step.conversation,
+    unapplied,
+    fixed: step.fixed ?? null,
+  };
 }
 
 // What the LLM is told about the day for new pieces.

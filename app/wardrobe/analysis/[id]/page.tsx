@@ -7,9 +7,9 @@ import { stylingFormality } from "@/lib/outfit/analysis";
 import { verdictSentence } from "@/lib/outfit/analysis-sentences";
 import { SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { todayInKorea } from "@/lib/outfit/dates";
-import { getOutfitRecommender, getPieceSuggestions, getWardrobeAnalysis } from "@/lib/outfit/server";
+import { getOutfitRecommender, getWardrobeAnalysis } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../../clothing-photo";
-import { PieceSuggestionCards } from "../../../piece-suggestions";
+import { PurchaseOutfitCard } from "../../../purchase-outfit-card";
 
 // One 안 입는 옷 with its 활용 코디, made on demand for today's weather.
 export default function UnwornDetail({ params }: PageProps<"/wardrobe/analysis/[id]">) {
@@ -36,19 +36,20 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
   }
 
   const wantsOutfits = item.remedies.includes("styling-outfits");
-  const outfits =
-    wantsOutfits && user.homeRegion
-      ? await getOutfitRecommender().stylingOutfits({
-          userId: user.id,
-          clothingId: id,
-          date: todayInKorea(),
-          location: { latitude: user.homeRegion.latitude, longitude: user.homeRegion.longitude },
-          formality: stylingFormality(item),
-        })
-      : [];
   // 조합 부족: what one more piece would bring.
   const lacking = item.verdict.kind === "cause" && item.verdict.cause.type === "combination";
-  const suggestions = lacking ? await getPieceSuggestions().reviving(user.id, id) : [];
+  const styling = user.homeRegion && {
+    userId: user.id,
+    clothingId: id,
+    date: todayInKorea(),
+    location: { latitude: user.homeRegion.latitude, longitude: user.homeRegion.longitude },
+    formality: stylingFormality(item),
+  };
+  const recommender = getOutfitRecommender();
+  const [outfits, withOnePiece] = await Promise.all([
+    wantsOutfits && styling ? recommender.stylingOutfits(styling) : [],
+    (wantsOutfits || lacking) && styling ? recommender.stylingPurchaseOutfits(styling) : null,
+  ]);
 
   return (
     <>
@@ -94,7 +95,30 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
           )}
         </section>
       )}
-      <PieceSuggestionCards suggestions={suggestions} returnTo={`/wardrobe/analysis/${id}`} />
+      {withOnePiece && withOnePiece.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="font-medium">한 벌만 더하면</h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            옷장에 없는 옷 한 벌을 더하면 {item.clothing.name}을(를) 이렇게도 입을 수 있어요.
+          </p>
+          <ul className="flex flex-col gap-3">
+            {withOnePiece.map((purchase) => (
+              <PurchaseOutfitCard
+                key={purchase.added.map((a) => a.clothing.id).join()}
+                item={purchase}
+                returnTo={`/wardrobe/analysis/${id}`}
+                dismissFor={id}
+              />
+            ))}
+          </ul>
+          <Link
+            href={`/home/shopping?${new URLSearchParams({ fixed: id })}`}
+            className="self-start text-sm text-zinc-600 underline dark:text-zinc-400"
+          >
+            구매 추천에서 더 보기
+          </Link>
+        </section>
+      )}
     </>
   );
 }

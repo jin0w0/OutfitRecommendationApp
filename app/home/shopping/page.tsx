@@ -3,18 +3,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { getAccount } from "@/lib/account/server";
-import { COLOR_NAMES, COLOR_SWATCHES, SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { purchaseConditionKey, purchaseConditionLabel } from "@/lib/outfit/purchase";
-import type { PurchaseConversation, PurchaseOutfit, PurchaseRecommendation } from "@/lib/outfit/recommender";
+import type { PurchaseConversation, PurchaseRecommendation } from "@/lib/outfit/recommender";
 import { getOutfitRecommender } from "@/lib/outfit/server";
 import { isEventKind } from "@/lib/outfit/situations";
-import type { Clothing, Slot } from "@/lib/outfit/wardrobe";
-import { ClothingPhoto } from "../../clothing-photo";
-import { restoreSuggestedClothing } from "../../wardrobe/analysis/actions";
+import { PurchaseOutfitCard } from "../../purchase-outfit-card";
 import { homeDate, undoTargets } from "../home-state";
 import { revisePurchase, undoPurchase } from "./actions";
-
-const SLOT_ORDER: Slot[] = ["outer", "top", "bottom", "dress", "shoes"];
 
 // 구매 추천 코디 for the date and 일정 the main screen was showing, and 구매
 // 대화 about them.
@@ -50,6 +45,8 @@ async function Content({ searchParams }: Pick<PageProps<"/home/shopping">, "sear
           date,
           situation,
           location: { latitude: user.homeRegion.latitude, longitude: user.homeRegion.longitude },
+          // 구매 추천에서 더 보기 from the 옷장 분석.
+          fixedClothingId: typeof params.fixed === "string" ? params.fixed : undefined,
         });
   const notice = continued ? noticeText(params.notice, params.direction) : null;
 
@@ -92,82 +89,19 @@ function Outfits({ result }: { result: PurchaseRecommendation }) {
     <>
       {!result.conversation && (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {result.kind === "all-new"
+          {result.fixed
+            ? `${result.fixed.name}에 한 벌만 더한 코디예요. 바꾸고 싶은 점은 AI 비서에게 말해 주세요.`
+            : result.kind === "all-new"
             ? "지금 옷장으로는 이날의 코디를 만들 수 없어서, 새 옷으로만 된 코디를 보여 드려요."
             : "가진 옷에 한 벌만 더한 코디예요. 새 옷이 가진 옷 몇 벌과 새로 어울리는지도 함께 보여 드려요."}
         </p>
       )}
       <ul className="flex flex-col gap-4">
         {result.outfits.map((item) => (
-          <PurchaseCard key={item.added.map((a) => a.clothing.id).join()} item={item} />
+          <PurchaseOutfitCard key={item.added.map((a) => a.clothing.id).join()} item={item} returnTo="/home" />
         ))}
       </ul>
     </>
-  );
-}
-
-function PurchaseCard({ item }: { item: PurchaseOutfit }) {
-  const addedOf = (clothing: Clothing) => item.added.find((a) => a.clothing.id === clothing.id);
-  const owned = Object.values(item.outfit).some((c) => !addedOf(c));
-  return (
-    <li
-      className={`flex flex-col gap-3 rounded-xl border p-4 ${owned ? "border-zinc-200 dark:border-zinc-800" : "border-dashed border-zinc-300 dark:border-zinc-700"}`}
-    >
-      <div className="flex flex-wrap gap-3">
-        {SLOT_ORDER.flatMap((slot) => {
-          const clothing = item.outfit[slot as keyof typeof item.outfit];
-          if (!clothing) return [];
-          const added = addedOf(clothing);
-          return added?.kind === "new" ? (
-            <NewPiece key={slot} clothing={clothing} />
-          ) : (
-            <div key={slot} className="flex w-20 flex-col items-center gap-1">
-              <ClothingPhoto clothing={clothing} className="h-20 w-20" />
-              <span className="text-center text-xs">
-                {added ? "정리한 옷 · " : ""}
-                {clothing.name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      {owned &&
-        item.added.map(({ kind, clothing, matchesOwned }) => (
-          <div key={clothing.id} className="flex flex-wrap items-center gap-2 text-sm">
-            <p>
-              {kind === "new"
-                ? `${clothing.name}이(가) 있으면 가진 옷 ${matchesOwned}벌과 새로 어울려요.`
-                : `정리한 ${clothing.name}을(를) 되돌리면 가진 옷 ${matchesOwned}벌과 어울려요. 새로 사지 않아도 돼요.`}
-            </p>
-            {kind === "restore" && (
-              <form action={restoreSuggestedClothing}>
-                <input type="hidden" name="clothingId" value={clothing.id} />
-                <input type="hidden" name="returnTo" value="/home" />
-                <button type="submit" className="underline">
-                  되돌리기
-                </button>
-              </form>
-            )}
-          </div>
-        ))}
-    </li>
-  );
-}
-
-function NewPiece({ clothing }: { clothing: Clothing }) {
-  return (
-    <div className="flex w-20 flex-col items-center gap-1">
-      <span
-        aria-label={COLOR_NAMES[clothing.color]}
-        className="flex h-20 w-20 items-end justify-center rounded-lg border border-dashed border-zinc-400 pb-1 text-[10px] text-white"
-        style={{ backgroundColor: COLOR_SWATCHES[clothing.color] }}
-      >
-        <span className="rounded bg-black/50 px-1">옷장에 없음</span>
-      </span>
-      <span className="text-center text-xs">
-        {SLOT_NAMES[clothing.slot]} · {clothing.name}
-      </span>
-    </div>
   );
 }
 

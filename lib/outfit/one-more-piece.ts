@@ -107,7 +107,7 @@ export function createPieceSuggestions({
     for (const candidate of candidates) {
       const looks = `${candidate.slot}|${candidate.color}`;
       if (seen.has(looks) || clothes.some((c) => isLike(c, candidate))) continue;
-      const id = `${targetKey}|${candidate.slot}|${candidate.color}|${candidate.style}|${candidate.formality}`;
+      const id = suggestionId(targetKey, candidate);
       if (dismissed.has(id)) continue;
       const count = brings(candidate);
       if (count < needed) continue;
@@ -159,6 +159,12 @@ function newOutfits(clothes: Clothing[], candidate: ClothingFields, counts: (out
   return candidateOutfits(withIt, needsOuter)
     .map((outfit) => Object.values(outfit))
     .filter((items) => items.includes(virtual) && counts(items) && isWellMatched(items)).length;
+}
+
+// What names a suggestion for 관심 없어요: the target (for reviving a piece,
+// its clothing id) and what the candidate looks like.
+export function suggestionId(targetKey: string, candidate: ClothingFields) {
+  return `${targetKey}|${candidate.slot}|${candidate.color}|${candidate.style}|${candidate.formality}`;
 }
 
 // Alike enough that having one, the other would be a 중복 구매.
