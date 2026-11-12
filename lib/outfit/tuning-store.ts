@@ -85,6 +85,19 @@ export function createTuningStore({ dialect }: { dialect: Dialect }) {
         .execute();
     },
 
+    // 입기 싫은 옷 the user picked on or after `from` (YYYY-MM-DD), with the
+    // date of each 거절. Going back to the start does not forget them.
+    async dislikedSince(userId: string, from: string) {
+      const rows = await db
+        .selectFrom("rejection")
+        .select(["date", "disliked_clothing_id"])
+        .where("user_id", "=", userId)
+        .where("date", ">=", from)
+        .where("disliked_clothing_id", "is not", null)
+        .execute();
+      return rows.map((row) => ({ clothingId: row.disliked_clothing_id!, date: row.date }));
+    },
+
     // The 거절 made since the user last went back to the start.
     async rejectionsSinceReset(userId: string) {
       const resetAt = await this.resetAt(userId);

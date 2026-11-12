@@ -35,6 +35,7 @@ export function getWardrobeAnalysis(): WardrobeAnalysis {
       wearRecords: createWearRecords({ dialect }),
       sessions: createRecommendationSessions({ dialect }),
       store: createAnalysisStore({ dialect }),
+      tuning: createTuningStore({ dialect }),
     });
   }
   return analysisInstance;

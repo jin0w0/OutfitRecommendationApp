@@ -15,6 +15,7 @@ import {
 import type { WearRecord, WearRecords } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
 import { ANSWERS, type Answer, type AnalysisStore } from "./analysis-store";
+import type { TuningStore } from "./tuning-store";
 
 export type { Answer } from "./analysis-store";
 
@@ -36,6 +37,9 @@ const USUAL_DAYS = 90;
 const USUAL_TOP = 3;
 // How long 그대로 두기 keeps a piece out of the analysis.
 const KEEP_DAYS = 90;
+// Picked as 입기 싫은 옷 this many times within DISLIKE_WINDOW_DAYS makes 마음 변화.
+const DISLIKES_FOR_CHANGED_MIND = 2;
+const DISLIKE_WINDOW_DAYS = 30;
 
 // The season each month is in, Korea's calendar.
 const SEASON_OF_MONTH: Season[] = [
@@ -86,12 +90,14 @@ export function createWardrobeAnalysis({
   wearRecords,
   sessions,
   store,
+  tuning,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "registeredAt" | "preferences">;
   wearRecords: Pick<WearRecords, "wornBefore">;
   sessions: Pick<RecommendationSessions, "firstStepsBetween">;
   store: AnalysisStore;
+  tuning: Pick<TuningStore, "dislikedSince">;
   // YYYY-MM-DD in Korea.
   today?: () => string;
 }) {
@@ -99,7 +105,7 @@ export function createWardrobeAnalysis({
     // 분석하기: the user's 안 입는 옷, the longest unworn first.
     async analyze(userId: string): Promise<UnwornClothing[]> {
       const date = today();
-      const [clothes, registeredAt, preferences, worn, firstSteps, answers, keptUntil] = await Promise.all([
+      const [clothes, registeredAt, preferences, worn, firstSteps, answers, keptUntil, dislikes] = await Promise.all([
         wardrobe.clothes(userId),
         wardrobe.registeredAt(userId),
         wardrobe.preferences(userId),
@@ -107,7 +113,10 @@ export function createWardrobeAnalysis({
         sessions.firstStepsBetween<{ basis: Basis | null }>(userId, addDays(date, -SITUATION_DAYS), date),
         store.answers(userId),
         store.keptUntil(userId),
+        tuning.dislikedSince(userId, addDays(date, 1 - DISLIKE_WINDOW_DAYS)),
       ]);
+      const dislikeCounts = new Map<string, number>();
+      for (const { clothingId } of dislikes) dislikeCounts.set(clothingId, (dislikeCounts.get(clothingId) ?? 0) + 1);
       const lastWorn = lastWornOn(worn);
       const facts: Facts = {
         date,
@@ -129,7 +138,14 @@ export function createWardrobeAnalysis({
         // An answer holds until the piece is worn on or after the day of it.
         const answered = answers.get(clothing.id);
         const answer = answered && (!lastWornOn || lastWornOn < answered.answeredOn) ? answered.answer : null;
-        const verdict: Verdict = age < NEW_DAYS ? { kind: "new" } : diagnose(clothing, facts, answer);
+        // Said twice not to be worn: the user's own word comes before the data.
+        const changedMind = (dislikeCounts.get(clothing.id) ?? 0) >= DISLIKES_FOR_CHANGED_MIND;
+        const verdict: Verdict =
+          age < NEW_DAYS
+            ? { kind: "new" }
+            : changedMind
+              ? { kind: "answered", answer: "changed-mind" }
+              : diagnose(clothing, facts, answer);
         return [
           {
             clothing,

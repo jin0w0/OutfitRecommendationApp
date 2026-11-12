@@ -167,6 +167,11 @@ export function RecommendationView({
                     {label}
                   </option>
                 ))}
+                {Object.values(recommendation.outfit).map((clothing) => (
+                  <option key={clothing.id} value={`dislike:${clothing.id}`}>
+                    {clothing.name}은(는) 입기 싫어요
+                  </option>
+                ))}
               </select>
               <button
                 type="submit"

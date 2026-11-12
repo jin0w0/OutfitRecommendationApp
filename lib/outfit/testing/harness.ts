@@ -68,6 +68,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     wearRecords,
     sessions,
     store: analysisStore,
+    tuning,
     today: () => current,
   });
 

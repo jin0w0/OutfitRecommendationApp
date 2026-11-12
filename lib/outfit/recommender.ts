@@ -4,7 +4,7 @@
 import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
-import { daysBetween, todayInKorea } from "./dates";
+import { addDays, daysBetween, todayInKorea } from "./dates";
 import { ASSUMED_DAYS_SINCE_WORN, type Clothing, type Formality, type Slot, type Wardrobe } from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
@@ -183,6 +183,9 @@ export type Recommendation = Step & {
 // Below this 기온 (°C) the 코디 gets an 아우터.
 const OUTER_BELOW = 17;
 
+// How many days a 입기 싫은 옷 is left out, the day it was picked included.
+const DISLIKE_DAYS = 14;
+
 // How many 활용 코디 are made at most.
 const STYLING_OUTFITS = 3;
 
@@ -333,7 +336,7 @@ export function createOutfitRecommender({
         missing: [],
       };
       const scoring = await scoringFacts(userId, day);
-      const { candidates } = outfitsUnder(clothes, day.weather, formality, fixedConditions(piece));
+      const { candidates } = outfitsUnder(clothes, day.weather, formality, fixedConditions(piece), await dislikedNow(userId));
       return candidates
         .map((outfit) => ({ outfit, total: total(score(outfit, scoring), scoring.weights) }))
         .sort((a, b) => b.total - a.total)
@@ -388,8 +391,9 @@ export function createOutfitRecommender({
       if (style && shifted(anchor, conditions) === shifted(anchor, earlier)) {
         return { ...unchanged, unapplied: { reason: "style-limit", message, direction: style.direction } };
       }
+      const disliked = await dislikedNow(userId);
       const under = (some: RevisionCondition[]) =>
-        outfitsUnder(wardrobeClothes, day.weather, shifted(anchor, some), some);
+        outfitsUnder(wardrobeClothes, day.weather, shifted(anchor, some), some, disliked);
       const { clothes, candidates } = under(conditions);
       if (!candidates.length) {
         // The conditions that could be met were it not for them, else every
@@ -531,15 +535,21 @@ export function createOutfitRecommender({
       date,
       clothingIds,
       reason = null,
+      dislikedClothingId = null,
     }: {
       userId: string;
       date: string;
       clothingIds: string[];
       reason?: RejectionReason | null;
+      // With reason "dislike": the piece of the 코디 the user won't wear.
+      dislikedClothingId?: string | null;
     }) {
       if (reason !== null && !REJECTION_REASONS.includes(reason)) throw new Error("Unknown 거절 이유");
-      void clothingIds;
-      await tuning.saveRejection(userId, { date, reason, dislikedClothingId: null });
+      const disliked = reason === "dislike" ? dislikedClothingId : null;
+      if (reason === "dislike" && (!disliked || !clothingIds.includes(disliked))) {
+        throw new Error("The 입기 싫은 옷 must be one of the rejected 코디");
+      }
+      await tuning.saveRejection(userId, { date, reason, dislikedClothingId: disliked });
     },
 
     // 추천 맞춤 보기: each factor's weight as a multiple of its default.
@@ -612,7 +622,13 @@ export function createOutfitRecommender({
     const missing = [...day.missing];
     const context = { ...day, missing, accepted: await acceptedOn(userId, day.date) };
     const scoring = await scoringFacts(userId, day);
-    const { clothes, candidates } = outfitsUnder(wardrobeClothes, day.weather, formality, conditions);
+    const { clothes, candidates } = outfitsUnder(
+      wardrobeClothes,
+      day.weather,
+      formality,
+      conditions,
+      await dislikedNow(userId),
+    );
     const shownKeys = new Set(shown.map((ids) => [...ids].sort().join()));
     const unshown = candidates.filter((outfit) => !shownKeys.has(outfitKey(outfit)));
     const best = maxBy(
@@ -646,6 +662,12 @@ export function createOutfitRecommender({
   // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
   // 격식 수준: the clothes are chosen at that one, but are not said to suit
   // the 일정 better than they do.
+  // The 입기 싫은 옷 still left out today: picked within DISLIKE_DAYS.
+  async function dislikedNow(userId: string) {
+    const disliked = await tuning.dislikedSince(userId, addDays(today(), 1 - DISLIKE_DAYS));
+    return new Set(disliked.map((d) => d.clothingId));
+  }
+
   // The user's 추천 맞춤, from their 거절 and 수락 since the last reset.
   async function userMultipliers(userId: string) {
     const [rejections, acceptances] = await Promise.all([
@@ -721,12 +743,18 @@ function outfitsUnder(
   weather: Weather | null,
   formality: Formality | null,
   conditions: RevisionCondition[],
+  // 입기 싫은 옷, left out unless a condition keeps them.
+  excluded: Set<string> = new Set(),
 ) {
   const kept = wardrobeClothes.filter((c) =>
     conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
   );
   const color = conditions.find((c) => c.type === "color");
-  const clothes = conditioned(wardrobeClothes, formality, conditions);
+  const clothes = conditioned(
+    wardrobeClothes.filter((c) => !excluded.has(c.id) || kept.includes(c)),
+    formality,
+    conditions,
+  );
   const needsOuter = (weather !== null && weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
   const candidates = candidateOutfits(clothes, needsOuter).filter(
     (outfit) =>

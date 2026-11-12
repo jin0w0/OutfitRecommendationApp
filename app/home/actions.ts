@@ -29,12 +29,14 @@ function backHome(formData: FormData, sessionId: string | null, extra: [string, 
 // plain "shown" list in the URL has always done.
 export async function rejectOutfit(formData: FormData) {
   const userId = await requireUserId();
-  const reason = String(formData.get("reason") ?? "");
+  // "dislike:<clothing id>" names the 입기 싫은 옷 along with the reason.
+  const [reason, dislikedClothingId = null] = String(formData.get("reason") ?? "").split(":");
   await getOutfitRecommender().reject({
     userId,
     date: formDate(formData),
     clothingIds: formData.getAll("clothing").map(String),
     reason: REJECTION_REASONS.includes(reason as RejectionReason) ? (reason as RejectionReason) : null,
+    dislikedClothingId,
   });
   backHome(
     formData,
