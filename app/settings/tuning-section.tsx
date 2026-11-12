@@ -1,6 +1,6 @@
 import type { Factor } from "@/lib/outfit/recommender";
 import { getOutfitRecommender } from "@/lib/outfit/server";
-import { resetTuning } from "../actions";
+import { resetTuning, setTiltOff } from "../actions";
 
 // What each factor is called when telling the user it is minded more.
 const FACTOR_NAMES: Record<Factor, string> = {
@@ -15,7 +15,7 @@ const FACTOR_NAMES: Record<Factor, string> = {
 
 // 내 추천 맞춤: what the 추천 now minds more for this user, and the way back.
 export async function TuningSection({ userId }: { userId: string }) {
-  const { multipliers } = await getOutfitRecommender().tuning(userId);
+  const { multipliers, tilt, tiltOff } = await getOutfitRecommender().tuning(userId);
   const minded = (Object.entries(multipliers) as [Factor, number][])
     .filter(([, multiplier]) => multiplier > 1)
     .sort((a, b) => b[1] - a[1]);
@@ -36,6 +36,19 @@ export async function TuningSection({ userId }: { userId: string }) {
             </li>
           ))}
         </ul>
+      )}
+      {tilt && (
+        <form action={setTiltOff} className="flex flex-wrap items-center gap-2 text-sm">
+          <input type="hidden" name="off" value={tiltOff ? "false" : "true"} />
+          <span>
+            대화에서 자주 &quot;{tilt === "casual" ? "더 캐주얼하게" : "더 포멀하게"}&quot;를 요청하셔서, 일정이 없는
+            날은 {tilt === "casual" ? "한 단계 캐주얼하게" : "한 단계 포멀하게"} 추천해요
+            {tiltOff ? " (지금은 꺼져 있어요)" : ""}.
+          </span>
+          <button type="submit" className="underline">
+            {tiltOff ? "다시 켜기" : "끄기"}
+          </button>
+        </form>
       )}
       <form action={resetTuning}>
         <button type="submit" className="text-sm text-zinc-600 underline dark:text-zinc-400">

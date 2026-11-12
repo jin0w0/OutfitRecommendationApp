@@ -75,6 +75,15 @@ export async function resetTuning() {
   redirect("/settings");
 }
 
+// 격식 기울기 켜기·끄기.
+export async function setTiltOff(formData: FormData) {
+  const requestHeaders = await headers();
+  const user = await getAccount().getCurrentUser(requestHeaders);
+  if (!user) redirect("/");
+  await getOutfitRecommender().setTiltOff(user.id, formData.get("off") === "true");
+  redirect("/settings");
+}
+
 export async function skipPreferences() {
   const requestHeaders = await headers();
   await getAccount().passPreferencesStep(requestHeaders);

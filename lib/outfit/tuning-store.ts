@@ -16,6 +16,8 @@ type Tables = {
     created_at: Generated<Date>;
   };
   tuning_setting: { user_id: string; reset_at: Date | null; tilt_off: Generated<boolean> };
+  // Each 스타일 방향 asked for in 대화로 수정하기, for the 격식 기울기.
+  style_request: { id: Generated<number>; user_id: string; date: string; direction: "casual" | "formal"; created_at: Generated<Date> };
   // One per date: the factors of the 추천 이유 of the 코디 accepted for it.
   acceptance_tuning: { user_id: string; date: string; factors: JSONColumnType<string[]>; created_at: Date };
 };
@@ -43,6 +45,15 @@ export function createTuningStore({ dialect }: { dialect: Dialect }) {
         .addColumn("tilt_off", "boolean", (c) => c.notNull().defaultTo(false))
         .execute();
       await db.schema
+        .createTable("style_request")
+        .ifNotExists()
+        .addColumn("id", "serial", (c) => c.primaryKey())
+        .addColumn("user_id", "text", (c) => c.notNull().references("user.id").onDelete("cascade"))
+        .addColumn("date", "text", (c) => c.notNull())
+        .addColumn("direction", "text", (c) => c.notNull())
+        .addColumn("created_at", "timestamptz", (c) => c.notNull().defaultTo(sql`now()`))
+        .execute();
+      await db.schema
         .createTable("acceptance_tuning")
         .ifNotExists()
         .addColumn("user_id", "text", (c) => c.notNull().references("user.id").onDelete("cascade"))
@@ -50,6 +61,35 @@ export function createTuningStore({ dialect }: { dialect: Dialect }) {
         .addColumn("factors", "jsonb", (c) => c.notNull())
         .addColumn("created_at", "timestamptz", (c) => c.notNull())
         .addPrimaryKeyConstraint("acceptance_tuning_pkey", ["user_id", "date"])
+        .execute();
+    },
+
+    async saveStyleRequest(userId: string, date: string, direction: "casual" | "formal") {
+      await db.insertInto("style_request").values({ user_id: userId, date, direction }).execute();
+    },
+
+    // The 스타일 방향 asked for on or after `from`, since the last reset.
+    async styleRequestsSince(userId: string, from: string) {
+      const resetAt = await this.resetAt(userId);
+      let query = db
+        .selectFrom("style_request")
+        .select("direction")
+        .where("user_id", "=", userId)
+        .where("date", ">=", from);
+      if (resetAt) query = query.where("created_at", ">", resetAt);
+      return (await query.execute()).map((row) => row.direction);
+    },
+
+    async tiltOff(userId: string): Promise<boolean> {
+      const row = await db.selectFrom("tuning_setting").select("tilt_off").where("user_id", "=", userId).executeTakeFirst();
+      return row?.tilt_off ?? false;
+    },
+
+    async setTiltOff(userId: string, off: boolean) {
+      await db
+        .insertInto("tuning_setting")
+        .values({ user_id: userId, reset_at: null, tilt_off: off })
+        .onConflict((oc) => oc.column("user_id").doUpdateSet({ tilt_off: off }))
         .execute();
     },
 
@@ -111,12 +151,15 @@ export function createTuningStore({ dialect }: { dialect: Dialect }) {
       return row?.reset_at ?? null;
     },
 
+    // Back to the default weights and no 격식 기울기; 입기 싫은 옷 and the
+    // 격식 기울기 switch stay.
     async reset(userId: string) {
       // A moment later than every record so far, whatever the clock's grain.
       const latest = await sql<{ latest: Date | null }>`
         select greatest(
           (select max(created_at) from rejection where user_id = ${userId}),
-          (select max(created_at) from acceptance_tuning where user_id = ${userId})
+          (select max(created_at) from acceptance_tuning where user_id = ${userId}),
+          (select max(created_at) from style_request where user_id = ${userId})
         ) as latest`.execute(db);
       const last = latest.rows[0]?.latest ? new Date(latest.rows[0].latest) : null;
       const now = new Date();

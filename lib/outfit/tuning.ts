@@ -24,6 +24,18 @@ const MAX_MULTIPLIER = 2;
 
 export type Multipliers = Record<Factor, number>;
 
+// 격식 기울기: a 스타일 방향 asked for TILT_REQUESTS times or more, and more
+// often than the other, over the requests counted.
+const TILT_REQUESTS = 3;
+
+export function tiltFrom(directions: ("casual" | "formal")[]): "casual" | "formal" | null {
+  const casual = directions.filter((d) => d === "casual").length;
+  const formal = directions.length - casual;
+  if (casual >= TILT_REQUESTS && casual > formal) return "casual";
+  if (formal >= TILT_REQUESTS && formal > casual) return "formal";
+  return null;
+}
+
 // Each factor's weight as a multiple of its default, from the 거절 and
 // 수락 counted.
 export function multipliersFrom({

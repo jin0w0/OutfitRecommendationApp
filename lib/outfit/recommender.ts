@@ -9,7 +9,14 @@ import { ASSUMED_DAYS_SINCE_WORN, type Clothing, type Formality, type Slot, type
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
-import { multipliersFrom, REJECTION_REASONS, weightsFrom, type Multipliers, type RejectionReason } from "./tuning";
+import {
+  multipliersFrom,
+  REJECTION_REASONS,
+  tiltFrom,
+  weightsFrom,
+  type Multipliers,
+  type RejectionReason,
+} from "./tuning";
 import type { TuningStore } from "./tuning-store";
 import type {
   CalendarEvent,
@@ -183,6 +190,18 @@ export type Recommendation = Step & {
 // Below this 기온 (°C) the 코디 gets an 아우터.
 const OUTER_BELOW = 17;
 
+// How far back the 스타일 방향 for the 격식 기울기 are counted.
+const TILT_DAYS = 30;
+
+// The 격식 수준 to choose at under the 격식 기울기: only on a day without
+// calendar 일정, one step that way from the picked situation's, or from
+// 캐주얼 or 세미 포멀 without one.
+function tilted(day: FoundDay, formality: Formality | null, tilt: "casual" | "formal" | null): Formality | null {
+  if (!tilt || day.events.length > 0) return formality;
+  if (!formality) return tilt === "casual" ? "casual" : "semi-formal";
+  return shifted(formality, [{ type: "style", direction: tilt }]);
+}
+
 // How many days a 입기 싫은 옷 is left out, the day it was picked included.
 const DISLIKE_DAYS = 14;
 
@@ -295,7 +314,7 @@ export function createOutfitRecommender({
       const clothes = await wardrobe.clothes(userId);
       const fixed = clothes.find((c) => c.id === fixedClothingId) ?? null;
       const step = await recommend(userId, day, clothes, {
-        formality: day.basis?.formality ?? null,
+        formality: tilted(day, day.basis?.formality ?? null, await activeTilt(userId)),
         conditions: fixedConditions(fixed),
         shown,
       });
@@ -382,6 +401,10 @@ export function createOutfitRecommender({
       // Nothing asked of the 코디: the user is asked to talk about the 코디
       // instead.
       if (!asked.conditions.length) return { ...unchanged, unapplied: { reason: "off-topic", message } };
+      // Each 스타일 방향 asked for counts toward the 격식 기울기.
+      for (const condition of asked.conditions) {
+        if (condition.type === "style") await tuning.saveStyleRequest(userId, today(), condition.direction);
+      }
       const earlier = last.revision?.conditions ?? fixedConditions(session.steps[0].fixed);
       const conditions = accumulate(earlier, asked.conditions);
       const day = dayOf(last);
@@ -553,8 +576,21 @@ export function createOutfitRecommender({
     },
 
     // 추천 맞춤 보기: each factor's weight as a multiple of its default.
-    async tuning(userId: string): Promise<{ multipliers: Multipliers }> {
-      return { multipliers: await userMultipliers(userId) };
+    // and the 격식 기울기 with whether it is turned off.
+    async tuning(
+      userId: string,
+    ): Promise<{ multipliers: Multipliers; tilt: "casual" | "formal" | null; tiltOff: boolean }> {
+      const [multipliers, tilt, tiltOff] = await Promise.all([
+        userMultipliers(userId),
+        currentTilt(userId),
+        tuning.tiltOff(userId),
+      ]);
+      return { multipliers, tilt, tiltOff };
+    },
+
+    // 격식 기울기 켜기·끄기.
+    async setTiltOff(userId: string, off: boolean) {
+      await tuning.setTiltOff(userId, off);
     },
 
     // 추천 맞춤 되돌리기: back to the default weights.
@@ -662,6 +698,16 @@ export function createOutfitRecommender({
   // against the 기준 일정 itself, also when 대화로 수정하기 asked for another
   // 격식 수준: the clothes are chosen at that one, but are not said to suit
   // the 일정 better than they do.
+  // The 격식 기울기 from the 스타일 방향 asked for within TILT_DAYS.
+  async function currentTilt(userId: string) {
+    return tiltFrom(await tuning.styleRequestsSince(userId, addDays(today(), 1 - TILT_DAYS)));
+  }
+
+  // The 격식 기울기 to apply: none when the user turned it off.
+  async function activeTilt(userId: string) {
+    return (await tuning.tiltOff(userId)) ? null : currentTilt(userId);
+  }
+
   // The 입기 싫은 옷 still left out today: picked within DISLIKE_DAYS.
   async function dislikedNow(userId: string) {
     const disliked = await tuning.dislikedSince(userId, addDays(today(), 1 - DISLIKE_DAYS));

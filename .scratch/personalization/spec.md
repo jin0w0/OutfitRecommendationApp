@@ -1,6 +1,6 @@
 # 거절과 추천 맞춤
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
