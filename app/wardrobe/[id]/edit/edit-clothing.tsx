@@ -6,7 +6,14 @@ import type { Clothing } from "@/lib/outfit/wardrobe";
 import { replaceClothingPhoto, updateClothing } from "../../actions";
 import { ClothingForm, fieldsOf, shrink } from "../../clothing-form";
 
+// Keyed like the 옷 등록 form: every visit by a link starts from the piece as
+// saved, not from what was left in the form last time.
 export function EditClothing({ clothing }: { clothing: Clothing }) {
+  const { bfcacheId } = useRouter();
+  return <ClothingEditor key={bfcacheId} clothing={clothing} />;
+}
+
+function ClothingEditor({ clothing }: { clothing: Clothing }) {
   const router = useRouter();
   const { id } = clothing;
   return (

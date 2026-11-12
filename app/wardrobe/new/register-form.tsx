@@ -16,7 +16,15 @@ type Stage =
 
 // The photos picked together are gone through one at a time: each is
 // analysed when its turn comes, confirmed or skipped, then the next.
+// With Cache Components, Next keeps this page's state when the user leaves
+// it. Coming back by a link or after registering starts afresh; only browser
+// back/forward returns to the photos in progress.
 export function RegisterForm() {
+  const { bfcacheId } = useRouter();
+  return <Registration key={bfcacheId} />;
+}
+
+function Registration() {
   const router = useRouter();
   const [queue, setQueue] = useState<File[]>([]);
   const [position, setPosition] = useState(0);
