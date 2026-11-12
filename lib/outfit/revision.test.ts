@@ -177,6 +177,26 @@ describe("대화로 수정하기: 색상 방향", () => {
     expect(revised.outfit.top).toEqual(whiteTee);
     expect(revised.outfit.bottom).toEqual(beigeChinos);
   });
+
+  test("a 하늘색 piece counts as a light color", async () => {
+    const { recommender, llm, createUser, addClothes } = await createTestOutfit();
+    const minji = await createUser("minji@gmail.com");
+    const [, skyShirt] = await addClothes(minji, [
+      { name: "검정 티셔츠", slot: "top", color: "black" },
+      { name: "하늘색 셔츠", slot: "top", color: "skyblue" },
+      { name: "검정 바지", slot: "bottom", color: "black" },
+      { name: "검정 운동화", slot: "shoes", color: "black" },
+    ]);
+    const first = await recommender.recommendForDate({ userId: minji, date: DATE, situation: null, location: SEOUL });
+    llm.interpret("좀 더 밝은 색으로", [{ type: "color", direction: "lighter" }]);
+
+    const revised = await recommender.revise({ userId: minji, sessionId: first.sessionId, message: "좀 더 밝은 색으로" });
+
+    expect(revised.unapplied).toBeNull();
+    expect(revised.status).toBe("ok");
+    if (revised.status !== "ok") return;
+    expect(revised.outfit.top).toEqual(skyShirt);
+  });
 });
 
 describe("수정 조건의 충돌", () => {

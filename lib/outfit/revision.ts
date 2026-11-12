@@ -1,7 +1,7 @@
 // 대화로 수정하기's 수정 조건: what they are, how they add up over a 추천
 // 세션, the 격식 수준 they move the 코디 to, and what a 수정 changed or should
 // warn of.
-import type { Clothing, Formality, Slot } from "./wardrobe";
+import type { Clothing, Color, Formality, Slot } from "./wardrobe";
 import type { AskedCondition } from "./ports";
 import { FORMALITY_LEVEL, type Basis, type Outfit } from "./scoring";
 
@@ -67,13 +67,28 @@ export type UnappliedRevision =
   | { reason: "unknown-clothing"; message: string }
   | { reason: "style-limit"; message: string; direction: StyleDirection };
 
-// Colors read as light or dark for the 색상 방향 of 대화로 수정하기. Others
-// count as neither.
-const LIGHT_COLORS = new Set(["white", "beige", "yellow", "pink", "orange", "ivory", "sky"]);
-const DARK_COLORS = new Set(["black", "navy", "brown", "gray", "khaki", "purple", "charcoal"]);
+// How every color reads for the 색상 방향 of 대화로 수정하기 and 구매 대화:
+// light, dark, or neither. A color added to the 15 must be given one here.
+const COLOR_TONES: Record<Color, "light" | "dark" | "neither"> = {
+  white: "light",
+  beige: "light",
+  yellow: "light",
+  pink: "light",
+  orange: "light",
+  skyblue: "light",
+  black: "dark",
+  navy: "dark",
+  brown: "dark",
+  gray: "dark",
+  khaki: "dark",
+  purple: "dark",
+  red: "neither",
+  green: "neither",
+  blue: "neither",
+};
 
-export function hasColorDirection(color: string, direction: ColorDirection) {
-  return (direction === "lighter" ? LIGHT_COLORS : DARK_COLORS).has(color);
+export function hasColorDirection(color: Color, direction: ColorDirection) {
+  return COLOR_TONES[color] === (direction === "lighter" ? "light" : "dark");
 }
 
 // The 수정 조건 the LLM answered, with the pieces they name from the 옷장,
