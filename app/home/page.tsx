@@ -78,6 +78,12 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         shown={shown}
         notice={continued ? noticeFrom(params) : null}
       />
+      <Link
+        href={`/home/shopping?${new URLSearchParams({ date, ...(situation && { situation }) })}`}
+        className="self-start text-sm text-zinc-600 underline dark:text-zinc-400"
+      >
+        구매 추천으로 보기
+      </Link>
       {recommendation.status === "unbuildable" && (
         <PieceSuggestionCards
           suggestions={(

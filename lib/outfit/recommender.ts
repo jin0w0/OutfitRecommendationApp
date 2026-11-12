@@ -5,7 +5,14 @@ import { regionOfPlace } from "./places";
 import { EVENT_KINDS, type EventKind } from "./situations";
 import { templateSentence } from "./reasons";
 import { addDays, daysBetween, todayInKorea } from "./dates";
-import { ASSUMED_DAYS_SINCE_WORN, type Clothing, type Formality, type Slot, type Wardrobe } from "./wardrobe";
+import {
+  ASSUMED_DAYS_SINCE_WORN,
+  type Clothing,
+  type ClothingFields,
+  type Formality,
+  type Slot,
+  type Wardrobe,
+} from "./wardrobe";
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
@@ -18,6 +25,9 @@ import {
   type RejectionReason,
 } from "./tuning";
 import type { TuningStore } from "./tuning-store";
+import { validClothingFields } from "./closet";
+import { fieldsOf, fingerprintOf, isLike, type DayConditions, type PieceAdviser } from "./one-more-piece";
+import type { PieceStore } from "./one-more-piece-store";
 import type {
   CalendarEvent,
   CalendarSource,
@@ -29,6 +39,7 @@ import type {
 } from "./ports";
 import {
   candidateOutfits,
+  isWellMatched,
   FORMALITY_LEVEL,
   maxBy,
   score,
@@ -205,6 +216,36 @@ function tilted(day: FoundDay, formality: Formality | null, tilt: "casual" | "fo
 // How many days a 입기 싫은 옷 is left out, the day it was picked included.
 const DISLIKE_DAYS = 14;
 
+// How many 구매 추천 코디 are shown at most.
+const PURCHASE_OUTFITS = 3;
+
+// How many owned pieces go well with `added` in some well-matched 코디.
+function ownedGoingWith(clothes: Clothing[], added: Clothing) {
+  const owned = new Set<string>();
+  for (const outfit of candidateOutfits([...clothes, added], added.slot === "outer")) {
+    const items = Object.values(outfit);
+    if (!items.includes(added) || !isWellMatched(items)) continue;
+    for (const item of items) if (item !== added) owned.add(item.id);
+  }
+  return owned.size;
+}
+
+// A whole new 코디 from the LLM, if every piece checks out and the 종류 make
+// a 코디: 상의·하의·신발 or 원피스·신발, with an optional 아우터.
+function wholeOutfit(raw: unknown): Partial<Record<Slot, ClothingFields>> | null {
+  const pieces = (raw as { pieces?: unknown[] } | null)?.pieces;
+  if (!Array.isArray(pieces)) return null;
+  const checked = pieces.map((p) => validClothingFields(p));
+  if (checked.some((p) => p === null)) return null;
+  const outfit: Partial<Record<Slot, ClothingFields>> = {};
+  for (const piece of checked as ClothingFields[]) {
+    if (outfit[piece.slot]) return null;
+    outfit[piece.slot] = piece;
+  }
+  const base = outfit.dress ? !outfit.top && !outfit.bottom : outfit.top && outfit.bottom;
+  return base && outfit.shoes ? outfit : null;
+}
+
 // How many 활용 코디 are made at most.
 const STYLING_OUTFITS = 3;
 
@@ -217,9 +258,11 @@ export function createOutfitRecommender({
   eventCorrections,
   sessions,
   tuning,
+  pieceAdviser,
+  pieceStore,
   today = todayInKorea,
 }: {
-  wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "preferences">;
+  wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "tidiedClothes" | "preferences">;
   weather: WeatherSource;
   calendar: CalendarSource;
   llm: LanguageModel;
@@ -227,6 +270,9 @@ export function createOutfitRecommender({
   eventCorrections: EventCorrections;
   sessions: RecommendationSessions;
   tuning: TuningStore;
+  // The LLM's 한 벌 후보 and where they are kept, for 구매 추천.
+  pieceAdviser: PieceAdviser;
+  pieceStore: PieceStore;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
 }) {
@@ -575,6 +621,106 @@ export function createOutfitRecommender({
       await tuning.saveRejection(userId, { date, reason, dislikedClothingId: disliked });
     },
 
+    // 구매 추천 코디 for the day, as 날짜로 추천받기 would find it: owned clothes
+    // with one new piece each, or, when the 옷장 makes no 코디 for the day,
+    // whole new 코디. The LLM proposes; the score rules choose.
+    async purchaseOutfits({
+      userId,
+      date,
+      situation,
+      location,
+    }: {
+      userId: string;
+      date: string;
+      situation: EventKind | null;
+      location: Coordinates;
+    }): Promise<PurchaseOutfits> {
+      const day = await findDay(userId, date, situation, location);
+      const formality = tilted(day, day.basis?.formality ?? null, await activeTilt(userId));
+      const [clothes, tidied, preferences, disliked] = await Promise.all([
+        wardrobe.clothes(userId),
+        wardrobe.tidiedClothes(userId),
+        wardrobe.preferences(userId),
+        dislikedNow(userId),
+      ]);
+      const conditions: DayConditions = {
+        formality,
+        temperature: day.weather?.temperature ?? null,
+        rain: day.weather?.rain ?? null,
+      };
+      const fingerprint = fingerprintOf(clothes, tidied);
+      const ask = async (key: string, propose: () => Promise<unknown[]>) => {
+        const saved = await pieceStore.candidates(userId, key, fingerprint);
+        if (saved) return saved;
+        try {
+          const proposed = await propose();
+          await pieceStore.saveCandidates(userId, key, fingerprint, proposed);
+          return proposed;
+        } catch (error) {
+          console.error("Could not get 구매 추천 from the LLM", error);
+          return null;
+        }
+      };
+      const dayKey = `${date}:${formality ?? "any"}`;
+
+      if (!outfitsUnder(clothes, day.weather, formality, [], disliked).candidates.length) {
+        const raw = await ask(`outfits:${dayKey}`, () => pieceAdviser.proposeOutfits({ day: conditions, preferences }));
+        if (!raw) return { kind: "unavailable" };
+        return { kind: "all-new", outfits: raw.flatMap((o) => wholeOutfit(o) ?? []).slice(0, PURCHASE_OUTFITS) };
+      }
+
+      const raw = await ask(`day:${dayKey}`, () =>
+        pieceAdviser.proposePieces({ target: { day: conditions }, wardrobe: clothes.map(fieldsOf), preferences }),
+      );
+      if (!raw) return { kind: "unavailable" };
+      const scoring = await scoringFacts(userId, day);
+      const chosen: (PurchaseOutfit & { total: number })[] = [];
+      for (const [index, candidate] of raw.flatMap((r) => validClothingFields(r) ?? []).entries()) {
+        if (clothes.some((c) => isLike(c, candidate))) continue;
+        const restorable = tidied.find((c) => isLike(c, candidate));
+        const added: Clothing = restorable ?? {
+          id: `가상의 옷 ${index}`,
+          ...candidate,
+          hasPhoto: false,
+          estimatedWearFrequency: null,
+        };
+        // A piece to buy is of the day's 격식 수준 itself, not one off as an
+        // owned piece may be when the 옷장 has none closer. Keeping it below
+        // is only to put it in every 코디.
+        if (formality && added.formality !== formality) continue;
+        const { candidates } = outfitsUnder(
+          [...clothes, added],
+          day.weather,
+          formality,
+          [{ type: "keep", clothing: added }],
+          disliked,
+        );
+        const best = maxBy(
+          candidates.map((outfit) => ({ outfit, total: total(score(outfit, scoring), scoring.weights) })),
+          ({ total }) => total,
+        );
+        if (!best) continue;
+        chosen.push({
+          outfit: best.outfit,
+          added: restorable ? { kind: "restore", clothing: restorable } : { kind: "new", id: added.id, piece: candidate },
+          matchesOwned: ownedGoingWith(clothes, added),
+          total: best.total,
+        });
+      }
+      const seen = new Set<string>();
+      const outfits = chosen
+        .sort((a, b) => b.total - a.total)
+        .filter(({ added }) => {
+          const looks = added.kind === "new" ? `${added.piece.slot}|${added.piece.color}` : added.clothing.id;
+          if (seen.has(looks)) return false;
+          seen.add(looks);
+          return true;
+        })
+        .slice(0, PURCHASE_OUTFITS)
+        .map(({ total, ...outfit }) => (void total, outfit));
+      return { kind: "with-wardrobe", outfits };
+    },
+
     // 추천 맞춤 보기: each factor's weight as a multiple of its default.
     // and the 격식 기울기 with whether it is turned off.
     async tuning(
@@ -900,5 +1046,18 @@ function missingSlots(clothes: Clothing[]): Slot[] {
   if (!has("shoes")) missing.push("shoes");
   return missing;
 }
+
+// One 구매 추천 코디: owned clothes and one piece added, a new one or a
+// 정리한 옷 to restore; and how many owned pieces that one goes well with.
+export type PurchaseOutfit = {
+  outfit: Outfit;
+  added: { kind: "new"; id: string; piece: ClothingFields } | { kind: "restore"; clothing: Clothing };
+  matchesOwned: number;
+};
+
+export type PurchaseOutfits =
+  | { kind: "with-wardrobe"; outfits: PurchaseOutfit[] }
+  | { kind: "all-new"; outfits: Partial<Record<Slot, ClothingFields>>[] }
+  | { kind: "unavailable" };
 
 export type OutfitRecommender = ReturnType<typeof createOutfitRecommender>;

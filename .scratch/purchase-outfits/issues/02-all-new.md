@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 옷장이 모자라면 all-new 코디가 나온다
-- [ ] 구성이 맞지 않거나 목록 밖 값이 있는 코디는 빠진다
+- [x] 옷장이 모자라면 all-new 코디가 나온다
+- [x] 구성이 맞지 않거나 목록 밖 값이 있는 코디는 빠진다

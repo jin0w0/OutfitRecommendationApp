@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 코디마다 새 옷 1벌과 가진 옷으로 이루어지고, 새 옷이 겹치지 않으며 최대 3개다
-- [ ] 가진 옷과 비슷한 후보는 빠진다
-- [ ] 그날의 격식 수준을 지킨다
-- [ ] LLM이 실패하면 unavailable이다
-- [ ] 같은 날 다시 부르면 LLM을 다시 부르지 않는다
+- [x] 코디마다 새 옷 1벌과 가진 옷으로 이루어지고, 새 옷이 겹치지 않으며 최대 3개다
+- [x] 가진 옷과 비슷한 후보는 빠진다
+- [x] 그날의 격식 수준을 지킨다
+- [x] LLM이 실패하면 unavailable이다
+- [x] 같은 날 다시 부르면 LLM을 다시 부르지 않는다

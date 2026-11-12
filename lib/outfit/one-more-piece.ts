@@ -7,7 +7,7 @@ import { validClothingFields } from "./closet";
 import { addDays, todayInKorea } from "./dates";
 import type { PieceStore } from "./one-more-piece-store";
 import { candidateOutfits, isWellMatched } from "./scoring";
-import type { Clothing, ClothingFields, Preferences, Slot, Wardrobe } from "./wardrobe";
+import type { Clothing, ClothingFields, Formality, Preferences, Slot, Wardrobe } from "./wardrobe";
 
 // How many new well-matched 코디 a piece must bring to be suggested.
 const TO_REVIVE = 2;
@@ -17,9 +17,12 @@ const MAX_SUGGESTIONS = 3;
 // How long 관심 없어요 hides a suggestion.
 const DISMISS_DAYS = 90;
 
+// The day a 구매 추천 is for, as the LLM is told about it.
+export type DayConditions = { formality: Formality | null; temperature: number | null; rain: boolean | null };
+
 // What the LLM is asked to suggest a piece for: a piece of the 옷장 to bring
-// back into use, or a 종류 the 옷장 has none of.
-export type PieceTarget = { revive: ClothingFields } | { fill: Slot };
+// back into use, a 종류 the 옷장 has none of, or a day (구매 추천).
+export type PieceTarget = { revive: ClothingFields } | { fill: Slot } | { day: DayConditions };
 
 // The 한 벌 후보 어댑터: candidate pieces for the target, unchecked.
 export type PieceAdviser = {
@@ -28,6 +31,8 @@ export type PieceAdviser = {
     wardrobe: ClothingFields[];
     preferences: Preferences;
   }): Promise<unknown[]>;
+  // Whole 코디 of pieces the user does not have, for the day: each { pieces }.
+  proposeOutfits(request: { day: DayConditions; preferences: Preferences }): Promise<unknown[]>;
 };
 
 export type PieceSuggestion =
@@ -152,7 +157,7 @@ function newOutfits(clothes: Clothing[], candidate: ClothingFields, counts: (out
 }
 
 // Alike enough that having one, the other would be a 중복 구매.
-function isLike(clothing: Clothing, candidate: ClothingFields) {
+export function isLike(clothing: Clothing, candidate: ClothingFields) {
   return (
     clothing.slot === candidate.slot &&
     clothing.color === candidate.color &&
@@ -160,12 +165,12 @@ function isLike(clothing: Clothing, candidate: ClothingFields) {
   );
 }
 
-function fieldsOf({ name, slot, color, seasons, style, formality, warmth, material }: Clothing): ClothingFields {
+export function fieldsOf({ name, slot, color, seasons, style, formality, warmth, material }: Clothing): ClothingFields {
   return { name, slot, color, seasons, style, formality, warmth, material };
 }
 
 // Changes whenever a piece is added, changed, 정리 or restored.
-function fingerprintOf(clothes: Clothing[], tidied: Clothing[]) {
+export function fingerprintOf(clothes: Clothing[], tidied: Clothing[]) {
   const describe = (list: Clothing[]) =>
     list
       .map(fieldsOf)

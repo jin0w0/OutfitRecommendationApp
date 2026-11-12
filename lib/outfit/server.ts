@@ -21,7 +21,7 @@ import { createNeonPhotoStorage } from "./neon-photo-storage";
 import { createOpenAiClothingVision } from "./openai-vision";
 import { createWardrobeAnalysis, type WardrobeAnalysis } from "./analysis";
 import { createAnalysisStore } from "./analysis-store";
-import { createPieceSuggestions, type PieceSuggestions } from "./one-more-piece";
+import { createPieceSuggestions, type PieceAdviser, type PieceSuggestions } from "./one-more-piece";
 import { createPieceStore } from "./one-more-piece-store";
 import { createOpenAiPieceAdviser } from "./openai-piece-adviser";
 
@@ -34,13 +34,9 @@ let piecesInstance: PieceSuggestions | undefined;
 export function getPieceSuggestions(): PieceSuggestions {
   if (!piecesInstance) {
     const dialect = new PostgresDialect({ pool: new Pool({ connectionString: requiredEnv("DATABASE_URL") }) });
-    const apiKey = process.env.OPENAI_API_KEY;
     piecesInstance = createPieceSuggestions({
       wardrobe: createWardrobe({ dialect }),
-      // Without a key every request fails, so nothing is suggested.
-      adviser: apiKey
-        ? createOpenAiPieceAdviser({ apiKey, model: process.env.OPENAI_MODEL || undefined })
-        : { proposePieces: async () => Promise.reject(new Error("Missing environment variable OPENAI_API_KEY")) },
+      adviser: pieceAdviser(),
       store: createPieceStore({ dialect }),
     });
   }
@@ -116,9 +112,22 @@ export function getOutfitRecommender(): OutfitRecommender {
       eventCorrections: createEventCorrections({ dialect }),
       sessions: createRecommendationSessions({ dialect }),
       tuning: createTuningStore({ dialect }),
+      pieceAdviser: pieceAdviser(),
+      pieceStore: createPieceStore({ dialect }),
     });
   }
   return instance;
+}
+
+// Without a key every request fails, so nothing is suggested and 구매 추천
+// says it cannot be made.
+function pieceAdviser(): PieceAdviser {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey) return createOpenAiPieceAdviser({ apiKey, model: process.env.OPENAI_MODEL || undefined });
+  const missingKey = async (): Promise<never> => {
+    throw new Error("Missing environment variable OPENAI_API_KEY");
+  };
+  return { proposePieces: missingKey, proposeOutfits: missingKey };
 }
 
 // Without a key every forecast fails, so recommendations go on without weather

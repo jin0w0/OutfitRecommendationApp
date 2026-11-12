@@ -1,6 +1,6 @@
 # 구매 추천 코디
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
@@ -82,3 +82,8 @@ Status: ready-for-agent
 ## Further Notes
 
 - 결정 근거: 2026-11-12 대화. 구성 (d), 버튼 (a), 이 한 벌 제안은 유지, 쇼핑 링크 없음.
+
+## Comments
+
+- 구현 중 정한 것: 사들일 새 옷은 그날의 격식 수준과 정확히 같아야 한다. 가진 옷은 옷장에 맞는 격식이 없으면 한 단계 다른 것도 쓰지만(기존 규칙), 새로 살 옷은 그날에 꼭 맞는 것만 권한다.
+

@@ -46,6 +46,9 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   await sessions.migrate();
   const tuning = createTuningStore({ dialect });
   await tuning.migrate();
+  const pieceStore = createPieceStore({ dialect });
+  await pieceStore.migrate();
+  const pieceAdviser = new FakePieceAdviser();
   const weather = new FakeWeather();
   const calendar = new FakeCalendar();
   const llm = new FakeLanguageModel();
@@ -58,6 +61,8 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     eventCorrections,
     sessions,
     tuning,
+    pieceAdviser,
+    pieceStore,
     today: () => current,
   });
 
@@ -75,9 +80,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     today: () => current,
   });
 
-  const pieceStore = createPieceStore({ dialect });
-  await pieceStore.migrate();
-  const pieceAdviser = new FakePieceAdviser();
+
   const pieces = createPieceSuggestions({ wardrobe, adviser: pieceAdviser, store: pieceStore, today: () => current });
 
   const signedIn = new Map<string, Headers>();
