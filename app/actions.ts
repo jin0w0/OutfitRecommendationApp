@@ -86,14 +86,6 @@ export async function setTiltOff(formData: FormData) {
   redirect("/settings");
 }
 
-// 성별, from the card on the main screen.
-export async function saveGender(formData: FormData) {
-  const user = await getAccount().getCurrentUser(await headers());
-  if (!user) redirect("/");
-  await getCloset().setGender(user.id, String(formData.get("gender")) as Gender);
-  redirect("/home");
-}
-
 export async function skipPreferences() {
   const requestHeaders = await headers();
   await getAccount().passPreferencesStep(requestHeaders);

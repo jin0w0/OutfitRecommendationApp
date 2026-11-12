@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -13,7 +14,12 @@ import { TuningSection } from "./tuning-section";
 export default function Settings({ searchParams }: PageProps<"/settings">) {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-10 px-6 py-12">
-      <h1 className="text-2xl font-semibold">설정</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">설정</h1>
+        <Link href="/home" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+          메인으로
+        </Link>
+      </div>
       <Suspense fallback={null}>
         <SettingsSections searchParams={searchParams} />
       </Suspense>

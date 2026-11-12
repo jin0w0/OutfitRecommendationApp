@@ -6,9 +6,7 @@ import type { CurrentUser } from "@/lib/account/account";
 import { getAccount } from "@/lib/account/server";
 import { getCloset, getOutfitRecommender, getPieceSuggestions } from "@/lib/outfit/server";
 import { isEventKind } from "@/lib/outfit/situations";
-import { saveGender, signOut } from "../actions";
-import { GENDER_NAMES } from "@/lib/outfit/clothing-names";
-import { GENDERS } from "@/lib/outfit/wardrobe";
+import { signOut } from "../actions";
 import { ReconnectNotice } from "../reconnect-notice";
 import { WeeklyPick } from "./weekly-pick";
 import { PieceSuggestionCards } from "../piece-suggestions";
@@ -67,7 +65,6 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
   return (
     <>
       <UserBar user={user} />
-      {(await getCloset().gender(user.id)) === null && <GenderCard />}
       <WeeklyPick userId={user.id} />
       {(user.calendarConnection?.status === "reconnect-needed" ||
         recommendation.missing.includes("calendar-reconnect-needed")) && (
@@ -96,28 +93,6 @@ async function HomeContent({ searchParams }: Pick<PageProps<"/home">, "searchPar
         />
       )}
     </>
-  );
-}
-
-// Asked once of users who have not chosen their 성별 yet.
-function GenderCard() {
-  return (
-    <section className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-      <p className="text-sm">성별을 알려 주시면 그에 맞는 새 옷을 추천해 드려요. 설정에서 언제든 바꿀 수 있어요.</p>
-      <form action={saveGender} className="flex gap-2">
-        {GENDERS.map((gender) => (
-          <button
-            key={gender}
-            type="submit"
-            name="gender"
-            value={gender}
-            className="h-9 rounded-full border border-zinc-300 px-4 text-sm dark:border-zinc-700"
-          >
-            {GENDER_NAMES[gender]}
-          </button>
-        ))}
-      </form>
-    </section>
   );
 }
 
