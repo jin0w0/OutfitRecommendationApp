@@ -7,6 +7,7 @@ import { stylingFormality } from "@/lib/outfit/analysis";
 import { verdictSentence } from "@/lib/outfit/analysis-sentences";
 import { SLOT_NAMES } from "@/lib/outfit/clothing-names";
 import { todayInKorea } from "@/lib/outfit/dates";
+import type { OutfitRecommender } from "@/lib/outfit/recommender";
 import { getOutfitRecommender, getWardrobeAnalysis } from "@/lib/outfit/server";
 import { ClothingPhoto } from "../../../clothing-photo";
 import { PurchaseOutfitCard } from "../../../purchase-outfit-card";
@@ -45,11 +46,7 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
     location: { latitude: user.homeRegion.latitude, longitude: user.homeRegion.longitude },
     formality: stylingFormality(item),
   };
-  const recommender = getOutfitRecommender();
-  const [outfits, withOnePiece] = await Promise.all([
-    wantsOutfits && styling ? recommender.stylingOutfits(styling) : [],
-    (wantsOutfits || lacking) && styling ? recommender.stylingPurchaseOutfits(styling) : null,
-  ]);
+  const outfits = wantsOutfits && styling ? await getOutfitRecommender().stylingOutfits(styling) : [];
 
   return (
     <>
@@ -95,30 +92,48 @@ async function Detail({ params }: Pick<PageProps<"/wardrobe/analysis/[id]">, "pa
           )}
         </section>
       )}
-      {withOnePiece && withOnePiece.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="font-medium">한 벌만 더하면</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            옷장에 없는 옷 한 벌을 더하면 {item.clothing.name}을(를) 이렇게도 입을 수 있어요.
-          </p>
-          <ul className="flex flex-col gap-3">
-            {withOnePiece.map((purchase) => (
-              <PurchaseOutfitCard
-                key={purchase.added.map((a) => a.clothing.id).join()}
-                item={purchase}
-                returnTo={`/wardrobe/analysis/${id}`}
-                dismissFor={id}
-              />
-            ))}
-          </ul>
-          <Link
-            href={`/home/shopping?${new URLSearchParams({ fixed: id })}`}
-            className="self-start text-sm text-zinc-600 underline dark:text-zinc-400"
-          >
-            구매 추천에서 더 보기
-          </Link>
-        </section>
+      {(wantsOutfits || lacking) && styling && (
+        // The LLM may take a while: the rest of the page does not wait for it.
+        <Suspense fallback={<p className="text-sm text-zinc-500">옷장에 없는 옷 한 벌을 더한 코디를 찾는 중…</p>}>
+          <WithOnePiece styling={styling} name={item.clothing.name} />
+        </Suspense>
       )}
     </>
+  );
+}
+
+// 한 벌만 더하면: 구매 추천 코디 with the piece, once the LLM has proposed.
+async function WithOnePiece({
+  styling,
+  name,
+}: {
+  styling: Parameters<OutfitRecommender["stylingPurchaseOutfits"]>[0];
+  name: string;
+}) {
+  const withOnePiece = await getOutfitRecommender().stylingPurchaseOutfits(styling);
+  if (!withOnePiece?.length) return null;
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="font-medium">한 벌만 더하면</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        옷장에 없는 옷 한 벌을 더하면 {name}을(를) 이렇게도 입을 수 있어요.
+      </p>
+      <ul className="flex flex-col gap-3">
+        {withOnePiece.map((purchase) => (
+          <PurchaseOutfitCard
+            key={purchase.added.map((a) => a.clothing.id).join()}
+            item={purchase}
+            returnTo={`/wardrobe/analysis/${styling.clothingId}`}
+            dismissFor={styling.clothingId}
+          />
+        ))}
+      </ul>
+      <Link
+        href={`/home/shopping?${new URLSearchParams({ fixed: styling.clothingId })}`}
+        className="self-start text-sm text-zinc-600 underline dark:text-zinc-400"
+      >
+        구매 추천에서 더 보기
+      </Link>
+    </section>
   );
 }

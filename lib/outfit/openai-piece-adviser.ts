@@ -78,6 +78,7 @@ export function createOpenAiPieceAdviser({ apiKey, model = "gpt-5-mini" }: { api
     }) {
       const response = await client.responses.create({
         model,
+        reasoning: { effort: "low" },
         instructions: INSTRUCTIONS,
         input: JSON.stringify({ target, wardrobe, preferences }),
         text: { format: { type: "json_schema", name: "piece_candidates", schema: SCHEMA, strict: true } },
@@ -88,6 +89,7 @@ export function createOpenAiPieceAdviser({ apiKey, model = "gpt-5-mini" }: { api
     async proposeOutfits({ day, preferences }: { day: DayConditions; preferences: Preferences }) {
       const response = await client.responses.create({
         model,
+        reasoning: { effort: "low" },
         instructions: OUTFIT_INSTRUCTIONS,
         input: JSON.stringify({ day, preferences }),
         text: { format: { type: "json_schema", name: "new_outfits", schema: OUTFITS_SCHEMA, strict: true } },
