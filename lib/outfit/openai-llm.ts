@@ -5,7 +5,8 @@ import OpenAI from "openai";
 import type { EventJudgement, EventText, LanguageModel, AskedCondition, RevisionRequest } from "./ports";
 import type { Evidence } from "./scoring";
 import { EVENT_KINDS, isEventKind } from "./situations";
-import type { Formality } from "./wardrobe";
+import type { AskedPurchaseCondition, PurchaseReplyFacts, PurchaseRequest } from "./purchase";
+import { COLORS, MATERIALS, SLOTS, type Color, type Formality, type Material, type Slot } from "./wardrobe";
 
 const FORMALITIES: Formality[] = ["casual", "semi-formal", "formal"];
 
@@ -37,6 +38,24 @@ const REVISION_INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자
 - off-topic: 코디 수정과 관계없는 말이다("오늘 점심 뭐 먹지?"). 이때는 이 조건 하나만 답한다.
 옷을 가리키는 말은 먼저 outfit에서, 없으면 wardrobe에서 찾는다. 어떤 옷인지 알 수 없으면 그 조건은 쓰지 않는다. 쓰지 않는 필드(direction 또는 clothingId)는 null로 둔다.
 사용자가 말한 순서대로 조건을 답한다. 코디를 직접 고르지 않는다.`;
+
+const PURCHASE_INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자가 구매 추천 코디(가진 옷에 새로 살 옷을 더한 코디)를 바꿔 달라고 한 말을 구매 조건으로 바꾼다.
+입력의 message는 사용자의 말, outfits는 사용자가 보고 있는 구매 추천 코디들, wardrobe는 사용자의 옷장 전체다. 옷마다 id, 이름(name), 종류(slot: top 상의, bottom 하의, dress 원피스, outer 아우터, shoes 신발), 색(color), 격식 수준(formality)이 있고, outfits의 옷 중 added가 true인 옷은 아직 없는 새 옷이다.
+구매 조건의 종류(type)는 다음과 같다.
+- slots: 새 옷의 종류. "아우터로 추천해 줘"는 slots=["outer"], "바지랑 신발 둘 다 새로"는 slots=["bottom","shoes"]. 전부 새 옷으로 해 달라면 all=true.
+- color: 새 옷을 더 밝은 색으로(direction=lighter) 또는 더 어두운 색으로(direction=darker).
+- color-name: 새 옷을 특정 색으로. color에 색 값을 쓴다.
+- material: 새 옷을 특정 소재로. material에 소재 값을 쓴다.
+- style: 더 캐주얼하게(direction=casual) 또는 더 포멀하게(direction=formal).
+- keep: 이 옷은 꼭 넣어 달라("내 네이비 셔츠랑 어울리게", "이 니트 좋다"). clothingId에 그 옷의 id를 쓴다.
+- exclude: 이 옷은 빼 달라("이 바지 말고"). clothingId에 그 옷의 id를 쓴다.
+- off-topic: 옷이나 코디와 관계없는 말이다. 이때는 이 조건 하나만 답한다.
+옷을 가리키는 말은 먼저 outfits에서, 없으면 wardrobe에서 찾는다. 어떤 옷인지 알 수 없으면 그 조건은 쓰지 않는다. 쓰지 않는 필드는 null로 둔다.
+사용자가 말한 순서대로 조건을 답한다. 코디나 옷을 직접 고르지 않는다.`;
+
+const REPLY_INSTRUCTIONS = `너는 옷차림 추천 서비스의 친절한 AI 비서다. 사용자가 구매 추천 코디를 바꿔 달라고 했고, 서비스가 그 조건으로 코디를 다시 골랐다.
+입력의 message는 사용자의 말, conditions는 지금까지 걸린 조건, outfits는 새로 고른 코디들이다. 코디마다 added는 더한 옷(name, 가진 옷 몇 벌과 새로 어울리는지 matchesOwned, 정리한 옷을 되돌리는 것이면 restore=true), owned는 함께 입는 가진 옷의 이름이다.
+사용자에게 한국어 존댓말로 한두 문장의 친근한 답장을 쓴다. 무엇을 반영했는지와 첫 코디의 더한 옷을 말한다. 입력에 없는 사실(가격, 브랜드, 날씨 등)은 절대 더하지 않는다.`;
 
 export function createOpenAiLanguageModel({
   apiKey,
@@ -127,6 +146,94 @@ export function createOpenAiLanguageModel({
         if (type === "off-topic") return { type };
         throw new Error("The LLM answered outside the schema");
       });
+    },
+
+    async interpretPurchase({ message, outfits, addedIds, wardrobe }: PurchaseRequest): Promise<AskedPurchaseCondition[]> {
+      const piece = ({ id, name, slot, color, formality }: PurchaseRequest["wardrobe"][number]) => ({
+        id,
+        name,
+        slot,
+        color,
+        formality,
+      });
+      const answer = (await structured(
+        "purchase_conditions",
+        PURCHASE_INSTRUCTIONS,
+        {
+          message,
+          outfits: outfits.map((o) => o.map((c) => ({ ...piece(c), added: addedIds.includes(c.id) }))),
+          wardrobe: wardrobe.map(piece),
+        },
+        {
+          type: "object",
+          properties: {
+            conditions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["slots", "color", "color-name", "material", "style", "keep", "exclude", "off-topic"],
+                  },
+                  slots: { type: ["array", "null"], items: { type: "string", enum: SLOTS } },
+                  all: { type: ["boolean", "null"] },
+                  direction: { type: ["string", "null"], enum: ["casual", "formal", "lighter", "darker", null] },
+                  color: { type: ["string", "null"], enum: [...COLORS, null] },
+                  material: { type: ["string", "null"], enum: [...MATERIALS, null] },
+                  clothingId: { type: ["string", "null"] },
+                },
+                required: ["type", "slots", "all", "direction", "color", "material", "clothingId"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["conditions"],
+          additionalProperties: false,
+        },
+      )) as {
+        conditions: {
+          type: unknown;
+          slots: unknown;
+          all: unknown;
+          direction: unknown;
+          color: unknown;
+          material: unknown;
+          clothingId: unknown;
+        }[];
+      };
+      return answer.conditions.map((c): AskedPurchaseCondition => {
+        if (c.type === "slots" && c.all === true) return { type: "slots", slots: "all" };
+        if (c.type === "slots" && Array.isArray(c.slots) && c.slots.length && c.slots.every((s) => SLOTS.includes(s))) {
+          return { type: "slots", slots: [...new Set(c.slots as Slot[])] };
+        }
+        if (c.type === "style" && (c.direction === "casual" || c.direction === "formal")) {
+          return { type: "style", direction: c.direction };
+        }
+        if (c.type === "color" && (c.direction === "lighter" || c.direction === "darker")) {
+          return { type: "color", direction: c.direction };
+        }
+        if (c.type === "color-name" && COLORS.includes(c.color as Color)) return { type: "color-name", color: c.color as Color };
+        if (c.type === "material" && MATERIALS.includes(c.material as Material)) {
+          return { type: "material", material: c.material as Material };
+        }
+        if ((c.type === "keep" || c.type === "exclude") && typeof c.clothingId === "string") {
+          return { type: c.type, clothingId: c.clothingId };
+        }
+        if (c.type === "off-topic") return { type: "off-topic" };
+        throw new Error("The LLM answered outside the schema");
+      });
+    },
+
+    async writePurchaseReply(facts: PurchaseReplyFacts): Promise<string> {
+      const answer = (await structured("purchase_reply", REPLY_INSTRUCTIONS, facts, {
+        type: "object",
+        properties: { reply: { type: "string" } },
+        required: ["reply"],
+        additionalProperties: false,
+      })) as { reply: unknown };
+      if (typeof answer.reply !== "string") throw new Error("The LLM answered outside the schema");
+      return answer.reply;
     },
 
     async writeReasons(evidence: Evidence[]): Promise<string[]> {

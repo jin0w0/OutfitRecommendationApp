@@ -4,6 +4,7 @@ import type { EventKind } from "./situations";
 import type { Clothing, Formality } from "./wardrobe";
 import type { Evidence } from "./scoring";
 import type { RevisionCondition } from "./revision";
+import type { AskedPurchaseCondition, PurchaseReplyFacts, PurchaseRequest } from "./purchase";
 
 export type Coordinates = { latitude: number; longitude: number };
 
@@ -67,6 +68,11 @@ export type LanguageModel = {
   // 코디 the user is looking at and `wardrobe` their whole 옷장, so that
   // conditions can name pieces ("이 바지") by clothing id.
   interpretRevision(request: RevisionRequest): Promise<AskedCondition[]>;
+  // The 구매 조건 a 구매 대화 message asks for, in the order asked, naming
+  // pieces of the 코디 shown or the 옷장 by id.
+  interpretPurchase(request: PurchaseRequest): Promise<AskedPurchaseCondition[]>;
+  // The 비서 답장: one or two friendly sentences saying only what the facts hold.
+  writePurchaseReply(facts: PurchaseReplyFacts): Promise<string>;
 };
 
 export type RevisionRequest = { message: string; outfit: Clothing[]; wardrobe: Clothing[] };

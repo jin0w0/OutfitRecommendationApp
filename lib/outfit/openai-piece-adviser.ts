@@ -8,6 +8,7 @@ import { COLORS, FORMALITIES, MATERIALS, SEASONS, SLOTS, STYLES, WARMTHS } from 
 
 const INSTRUCTIONS = `너는 옷차림 추천 서비스에서 사용자의 옷장에 없는 옷 한 벌을 제안한다. 목적은 사용자가 이미 가진 옷을 더 많이 입게 하는 것이다.
 입력의 target이 revive이면, 그 옷과 함께 입어 색 조합과 스타일이 잘 어울리는 다른 종류의 옷을 제안한다. target이 fill이면, 그 종류(slot)의 옷을 제안해 옷장의 다른 옷과 코디가 되게 한다. target이 day이면, 그날의 격식 수준(formality, null이면 상관없음)과 기온(temperature °C)·비(rain)에 맞으면서 가진 옷과 함께 입기 좋은 옷을 제안한다.
+target이 day이고 request가 있으면 사용자가 대화로 요청한 조건이다. 모든 후보가 그 조건을 지킨다: slots(새 옷의 종류 목록, "all"이면 코디의 모든 종류. 종류마다 2벌 이상), color(lighter 밝은 색, darker 어두운 색, 또는 색 값), material(소재 값). null은 상관없음이다.
 wardrobe는 사용자가 가진 옷, preferences는 좋아하는 색과 스타일이다.
 - 서로 다른 후보 6벌을 제안한다. 색이나 종류가 서로 겹치지 않게 한다.
 - 사용자가 이미 가진 옷과 같은 옷(같은 종류·색·격식)은 제안하지 않는다.

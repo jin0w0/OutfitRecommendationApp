@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { validClothingFields } from "./closet";
 import { addDays, todayInKorea } from "./dates";
 import type { PieceStore } from "./one-more-piece-store";
+import type { PieceRequest } from "./purchase";
 import { candidateOutfits, isWellMatched } from "./scoring";
 import type { Clothing, ClothingFields, Formality, Preferences, Slot, Wardrobe } from "./wardrobe";
 
@@ -22,7 +23,11 @@ export type DayConditions = { formality: Formality | null; temperature: number |
 
 // What the LLM is asked to suggest a piece for: a piece of the 옷장 to bring
 // back into use, a 종류 the 옷장 has none of, or a day (구매 추천).
-export type PieceTarget = { revive: ClothingFields } | { fill: Slot } | { day: DayConditions };
+// With a 구매 대화, the day comes with what the 구매 조건 ask of the pieces.
+export type PieceTarget =
+  | { revive: ClothingFields }
+  | { fill: Slot }
+  | { day: DayConditions; request?: PieceRequest };
 
 // The 한 벌 후보 어댑터: candidate pieces for the target, unchecked.
 export type PieceAdviser = {

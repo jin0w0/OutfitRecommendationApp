@@ -25,8 +25,24 @@ import {
   type RejectionReason,
 } from "./tuning";
 import type { TuningStore } from "./tuning-store";
-import { validClothingFields } from "./closet";
-import { fieldsOf, fingerprintOf, isLike, type DayConditions, type PieceAdviser } from "./one-more-piece";
+import { fieldsOf, fingerprintOf, type DayConditions, type PieceAdviser } from "./one-more-piece";
+import { outfitsUnder } from "./outfits-under";
+import {
+  accumulatePurchase,
+  allNewOutfit,
+  checkedPieces,
+  choosePurchaseOutfits,
+  mergedPool,
+  pieceRequest,
+  PURCHASE_OUTFITS,
+  replyFacts,
+  resolvedPurchase,
+  styleOf,
+  templateReply,
+  wholeOutfit,
+  type PurchaseCondition,
+  type PurchaseOutfits,
+} from "./purchase";
 import type { PieceStore } from "./one-more-piece-store";
 import type {
   CalendarEvent,
@@ -38,8 +54,6 @@ import type {
   WeatherSource,
 } from "./ports";
 import {
-  candidateOutfits,
-  isWellMatched,
   FORMALITY_LEVEL,
   maxBy,
   score,
@@ -54,12 +68,12 @@ import {
 import {
   accumulate,
   changesBetween,
-  hasColorDirection,
   resolved,
   shifted,
   warningsFor,
   type Revision,
   type RevisionCondition,
+  type StyleDirection,
   type UnappliedRevision,
 } from "./revision";
 
@@ -77,6 +91,7 @@ export type {
   WeatherSource,
 } from "./ports";
 export type { Basis, Evidence, Factor, Outfit, Reason, Scores } from "./scoring";
+export type { AddedPiece, PurchaseCondition, PurchaseOutfit, PurchaseOutfits } from "./purchase";
 export type {
   ColorDirection,
   OutfitChange,
@@ -198,8 +213,6 @@ export type Recommendation = Step & {
   unapplied: UnappliedRevision | null;
 };
 
-// Below this 기온 (°C) the 코디 gets an 아우터.
-const OUTER_BELOW = 17;
 
 // How far back the 스타일 방향 for the 격식 기울기 are counted.
 const TILT_DAYS = 30;
@@ -216,35 +229,6 @@ function tilted(day: FoundDay, formality: Formality | null, tilt: "casual" | "fo
 // How many days a 입기 싫은 옷 is left out, the day it was picked included.
 const DISLIKE_DAYS = 14;
 
-// How many 구매 추천 코디 are shown at most.
-const PURCHASE_OUTFITS = 3;
-
-// How many owned pieces go well with `added` in some well-matched 코디.
-function ownedGoingWith(clothes: Clothing[], added: Clothing) {
-  const owned = new Set<string>();
-  for (const outfit of candidateOutfits([...clothes, added], added.slot === "outer")) {
-    const items = Object.values(outfit);
-    if (!items.includes(added) || !isWellMatched(items)) continue;
-    for (const item of items) if (item !== added) owned.add(item.id);
-  }
-  return owned.size;
-}
-
-// A whole new 코디 from the LLM, if every piece checks out and the 종류 make
-// a 코디: 상의·하의·신발 or 원피스·신발, with an optional 아우터.
-function wholeOutfit(raw: unknown): Partial<Record<Slot, ClothingFields>> | null {
-  const pieces = (raw as { pieces?: unknown[] } | null)?.pieces;
-  if (!Array.isArray(pieces)) return null;
-  const checked = pieces.map((p) => validClothingFields(p));
-  if (checked.some((p) => p === null)) return null;
-  const outfit: Partial<Record<Slot, ClothingFields>> = {};
-  for (const piece of checked as ClothingFields[]) {
-    if (outfit[piece.slot]) return null;
-    outfit[piece.slot] = piece;
-  }
-  const base = outfit.dress ? !outfit.top && !outfit.bottom : outfit.top && outfit.bottom;
-  return base && outfit.shoes ? outfit : null;
-}
 
 // How many 활용 코디 are made at most.
 const STYLING_OUTFITS = 3;
@@ -623,7 +607,8 @@ export function createOutfitRecommender({
 
     // 구매 추천 코디 for the day, as 날짜로 추천받기 would find it: owned clothes
     // with one new piece each, or, when the 옷장 makes no 코디 for the day,
-    // whole new 코디. The LLM proposes; the score rules choose.
+    // whole new 코디. The LLM proposes; the score rules choose. Starts a 구매
+    // 추천 세션 for 구매 대화.
     async purchaseOutfits({
       userId,
       date,
@@ -634,7 +619,7 @@ export function createOutfitRecommender({
       date: string;
       situation: EventKind | null;
       location: Coordinates;
-    }): Promise<PurchaseOutfits> {
+    }): Promise<PurchaseRecommendation> {
       const day = await findDay(userId, date, situation, location);
       const formality = tilted(day, day.basis?.formality ?? null, await activeTilt(userId));
       const [clothes, tidied, preferences, disliked] = await Promise.all([
@@ -643,11 +628,6 @@ export function createOutfitRecommender({
         wardrobe.preferences(userId),
         dislikedNow(userId),
       ]);
-      const conditions: DayConditions = {
-        formality,
-        temperature: day.weather?.temperature ?? null,
-        rain: day.weather?.rain ?? null,
-      };
       const fingerprint = fingerprintOf(clothes, tidied);
       const ask = async (key: string, propose: () => Promise<unknown[]>) => {
         const saved = await pieceStore.candidates(userId, key, fingerprint);
@@ -663,62 +643,166 @@ export function createOutfitRecommender({
       };
       const dayKey = `${date}:${formality ?? "any"}`;
 
+      let result: PurchaseOutfits;
+      let pool: ClothingFields[] = [];
       if (!outfitsUnder(clothes, day.weather, formality, [], disliked).candidates.length) {
-        const raw = await ask(`outfits:${dayKey}`, () => pieceAdviser.proposeOutfits({ day: conditions, preferences }));
-        if (!raw) return { kind: "unavailable" };
-        return { kind: "all-new", outfits: raw.flatMap((o) => wholeOutfit(o) ?? []).slice(0, PURCHASE_OUTFITS) };
+        const raw = await ask(`outfits:${dayKey}`, () =>
+          pieceAdviser.proposeOutfits({ day: dayConditions(day, formality), preferences }),
+        );
+        const whole = (raw ?? []).flatMap((o) => wholeOutfit(o) ?? []).slice(0, PURCHASE_OUTFITS);
+        pool = mergedPool([], whole.flatMap((o) => Object.values(o)));
+        result = raw ? { kind: "all-new", outfits: whole.map(allNewOutfit) } : { kind: "unavailable" };
+      } else {
+        const raw = await ask(`day:${dayKey}`, () =>
+          pieceAdviser.proposePieces({
+            target: { day: dayConditions(day, formality) },
+            wardrobe: clothes.map(fieldsOf),
+            preferences,
+          }),
+        );
+        pool = checkedPieces(raw ?? []);
+        result = raw
+          ? {
+              kind: "with-wardrobe",
+              outfits: choosePurchaseOutfits({
+                owned: clothes,
+                tidied,
+                pool,
+                conditions: [],
+                formality,
+                weather: day.weather,
+                disliked,
+                scoreOf: await scorer(userId, day),
+                exactlyOne: true,
+              }),
+            }
+          : { kind: "unavailable" };
       }
+      const first: PurchaseStep = {
+        day,
+        formality,
+        anchor: formality ?? mostCommonFormality(result),
+        pool,
+        result,
+        conversation: null,
+      };
+      const sessionId = await sessions.start<PurchaseStep>(userId, date, first, "purchase");
+      return purchaseView(first, sessionId, 0, null);
+    },
 
-      const raw = await ask(`day:${dayKey}`, () =>
-        pieceAdviser.proposePieces({ target: { day: conditions }, wardrobe: clothes.map(fieldsOf), preferences }),
-      );
-      if (!raw) return { kind: "unavailable" };
-      const scoring = await scoringFacts(userId, day);
-      const chosen: (PurchaseOutfit & { total: number })[] = [];
-      for (const [index, candidate] of raw.flatMap((r) => validClothingFields(r) ?? []).entries()) {
-        if (clothes.some((c) => isLike(c, candidate))) continue;
-        const restorable = tidied.find((c) => isLike(c, candidate));
-        const added: Clothing = restorable ?? {
-          id: `가상의 옷 ${index}`,
-          ...candidate,
-          hasPhoto: false,
-          estimatedWearFrequency: null,
-        };
-        // A piece to buy is of the day's 격식 수준 itself, not one off as an
-        // owned piece may be when the 옷장 has none closer. Keeping it below
-        // is only to put it in every 코디.
-        if (formality && added.formality !== formality) continue;
-        const { candidates } = outfitsUnder(
-          [...clothes, added],
-          day.weather,
-          formality,
-          [{ type: "keep", clothing: added }],
-          disliked,
+    // 구매 대화: the 구매 추천 of the session's latest step, chosen again as
+    // `message` asks on top of what was asked before, with a 비서 답장. The
+    // LLM only turns the message into 구매 조건, proposes more pieces when
+    // those in the session run short, and writes the 답장.
+    async revisePurchase({
+      userId,
+      sessionId,
+      message,
+    }: {
+      userId: string;
+      sessionId: string;
+      message: string;
+    }): Promise<PurchaseRecommendation> {
+      const session = await sessions.get<PurchaseStep>(userId, sessionId, "purchase");
+      if (!session) throw new Error("No such 구매 추천 세션");
+      const last = session.steps.at(-1)!;
+      const unchanged = (unapplied: PurchaseUnapplied) =>
+        purchaseView(last, sessionId, session.steps.length - 1, unapplied);
+      const [owned, tidied, preferences, disliked] = await Promise.all([
+        wardrobe.clothes(userId),
+        wardrobe.tidiedClothes(userId),
+        wardrobe.preferences(userId),
+        dislikedNow(userId),
+      ]);
+      const shown = last.result.kind === "unavailable" ? [] : last.result.outfits;
+      let asked: ReturnType<typeof resolvedPurchase>;
+      try {
+        asked = resolvedPurchase(
+          await llm.interpretPurchase({
+            message,
+            outfits: shown.map((o) => Object.values(o.outfit)),
+            addedIds: shown.flatMap((o) => o.added.map((a) => a.clothing.id)),
+            wardrobe: owned,
+          }),
+          owned,
+          shown,
         );
-        const best = maxBy(
-          candidates.map((outfit) => ({ outfit, total: total(score(outfit, scoring), scoring.weights) })),
-          ({ total }) => total,
-        );
-        if (!best) continue;
-        chosen.push({
-          outfit: best.outfit,
-          added: restorable ? { kind: "restore", clothing: restorable } : { kind: "new", id: added.id, piece: candidate },
-          matchesOwned: ownedGoingWith(clothes, added),
-          total: best.total,
-        });
+      } catch {
+        return unchanged({ reason: "failed", message });
       }
-      const seen = new Set<string>();
-      const outfits = chosen
-        .sort((a, b) => b.total - a.total)
-        .filter(({ added }) => {
-          const looks = added.kind === "new" ? `${added.piece.slot}|${added.piece.color}` : added.clothing.id;
-          if (seen.has(looks)) return false;
-          seen.add(looks);
-          return true;
-        })
-        .slice(0, PURCHASE_OUTFITS)
-        .map(({ total, ...outfit }) => (void total, outfit));
-      return { kind: "with-wardrobe", outfits };
+      if (asked.unknownClothing) return unchanged({ reason: "unknown-clothing", message });
+      if (!asked.conditions.length) return unchanged({ reason: "off-topic", message });
+
+      const earlier = last.conversation?.conditions ?? [];
+      const conditions = accumulatePurchase(earlier, asked.conditions);
+      const { anchor } = session.steps[0];
+      const style = asked.conditions.find((c) => c.type === "style");
+      if (style && (!anchor || shifted(anchor, styleOf(conditions)) === shifted(anchor, styleOf(earlier)))) {
+        return unchanged({ reason: "style-limit", message, direction: style.direction });
+      }
+      const formality = styleOf(conditions).length ? shifted(anchor, styleOf(conditions)) : session.steps[0].formality;
+      const day = last.day;
+      const scoreOf = await scorer(userId, day);
+      const choose = (pool: ClothingFields[]) =>
+        choosePurchaseOutfits({ owned, tidied, pool, conditions, formality, weather: day.weather, disliked, scoreOf });
+
+      let pool = last.pool;
+      let outfits = choose(pool);
+      if (outfits.length < PURCHASE_OUTFITS) {
+        try {
+          const more = await pieceAdviser.proposePieces({
+            target: { day: dayConditions(day, formality), request: pieceRequest(conditions) },
+            wardrobe: owned.map(fieldsOf),
+            preferences,
+          });
+          pool = mergedPool(pool, checkedPieces(more));
+          outfits = choose(pool);
+        } catch (error) {
+          console.error("Could not get more 구매 추천 from the LLM", error);
+        }
+      }
+      if (!outfits.length) return unchanged({ reason: "unbuildable", message });
+
+      const facts = replyFacts(message, conditions, outfits);
+      let reply: string;
+      try {
+        reply = (await llm.writePurchaseReply(facts)).trim();
+        if (!reply) throw new Error("An empty 비서 답장");
+      } catch {
+        reply = templateReply(facts);
+      }
+      const allNew = outfits.every((o) => o.added.length === Object.values(o.outfit).length);
+      const step: PurchaseStep = {
+        day,
+        formality,
+        anchor,
+        pool,
+        result: { kind: allNew ? "all-new" : "with-wardrobe", outfits },
+        conversation: { message, conditions, reply },
+      };
+      await sessions.saveSteps<PurchaseStep>(userId, sessionId, [...session.steps, step]);
+      return purchaseView(step, sessionId, session.steps.length, null);
+    },
+
+    // The 구매 추천 of the 구매 추천 세션's latest step, or null when the
+    // session is not the user's or a later 구매 추천 replaced it.
+    async latestPurchase({ userId, sessionId }: { userId: string; sessionId: string }) {
+      const session = await sessions.get<PurchaseStep>(userId, sessionId, "purchase");
+      if (!session) return null;
+      return purchaseView(session.steps.at(-1)!, sessionId, session.steps.length - 1, null);
+    },
+
+    // 되돌리기 in 구매 대화: back to step `step` (0 for the first 구매 추천);
+    // the steps after it are dropped.
+    async undoPurchase({ userId, sessionId, step }: { userId: string; sessionId: string; step: number }) {
+      const session = await sessions.get<PurchaseStep>(userId, sessionId, "purchase");
+      if (!session) throw new Error("No such 구매 추천 세션");
+      if (!Number.isInteger(step) || step < 0 || step >= session.steps.length) {
+        throw new Error("No such step in the 구매 추천 세션");
+      }
+      const steps = session.steps.slice(0, step + 1);
+      await sessions.saveSteps<PurchaseStep>(userId, sessionId, steps);
+      return purchaseView(steps[step], sessionId, step, null);
     },
 
     // 추천 맞춤 보기: each factor's weight as a multiple of its default.
@@ -869,6 +953,12 @@ export function createOutfitRecommender({
     return multipliersFrom({ rejections, acceptances });
   }
 
+  // Each 코디's total score for the day, with the user's 추천 맞춤.
+  async function scorer(userId: string, day: FoundDay) {
+    const scoring = await scoringFacts(userId, day);
+    return (outfit: Outfit) => total(score(outfit, scoring), scoring.weights);
+  }
+
   async function scoringFacts(userId: string, day: FoundDay): Promise<ScoringFacts> {
     const { events, baseEvent, basis, weather, date } = day;
     return {
@@ -927,34 +1017,6 @@ export function createOutfitRecommender({
   }
 }
 
-// Every 코디 the 옷장 can make for the day at `formality` under the 수정 조건,
-// and the clothes they may be made of. Under a 색상 방향 every 코디 has a
-// piece in it, so none when the 옷장 has no such piece to wear.
-function outfitsUnder(
-  wardrobeClothes: Clothing[],
-  weather: Weather | null,
-  formality: Formality | null,
-  conditions: RevisionCondition[],
-  // 입기 싫은 옷, left out unless a condition keeps them.
-  excluded: Set<string> = new Set(),
-) {
-  const kept = wardrobeClothes.filter((c) =>
-    conditions.some((condition) => condition.type === "keep" && condition.clothing.id === c.id),
-  );
-  const color = conditions.find((c) => c.type === "color");
-  const clothes = conditioned(
-    wardrobeClothes.filter((c) => !excluded.has(c.id) || kept.includes(c)),
-    formality,
-    conditions,
-  );
-  const needsOuter = (weather !== null && weather.temperature < OUTER_BELOW) || kept.some((c) => c.slot === "outer");
-  const candidates = candidateOutfits(clothes, needsOuter).filter(
-    (outfit) =>
-      kept.every((c) => Object.values(outfit).includes(c)) &&
-      (!color || Object.values(outfit).some((c) => hasColorDirection(c.color, color.direction))),
-  );
-  return { clothes, candidates };
-}
 
 function sameIds(a: string[], b: string[]) {
   return a.length === b.length && [...a].sort().join() === [...b].sort().join();
@@ -989,42 +1051,6 @@ function mostFormal(events: DayEvent[]) {
   return best;
 }
 
-// Per slot, the clothes that match the 격식 수준, falling back to those one
-// level off. Clothes two levels off are never worn at it.
-function suitableClothes(clothes: Clothing[], formality: Formality | null) {
-  if (!formality) return clothes;
-  const distance = (c: Clothing) =>
-    Math.abs(FORMALITY_LEVEL[c.formality] - FORMALITY_LEVEL[formality]);
-  const suitable: Clothing[] = [];
-  for (const slot of new Set(clothes.map((c) => c.slot))) {
-    const inSlot = clothes.filter((c) => c.slot === slot);
-    const exact = inSlot.filter((c) => distance(c) === 0);
-    suitable.push(...(exact.length ? exact : inSlot.filter((c) => distance(c) === 1)));
-  }
-  return suitable;
-}
-
-// The clothes a 코디 may be made of under the 수정 조건: none that is
-// excluded; per slot, those at the 격식 수준 and in the 색상 방향 where the
-// slot has any; and every kept piece, whatever else is asked.
-function conditioned(clothes: Clothing[], formality: Formality | null, conditions: RevisionCondition[]) {
-  const excluded = new Set(conditions.flatMap((c) => (c.type === "exclude" ? [c.clothing.id] : [])));
-  const keptIds = new Set(conditions.flatMap((c) => (c.type === "keep" ? [c.clothing.id] : [])));
-  const color = conditions.find((c) => c.type === "color");
-  const kept = clothes.filter((c) => keptIds.has(c.id));
-  let pool = suitableClothes(
-    clothes.filter((c) => !excluded.has(c.id) && !keptIds.has(c.id)),
-    formality,
-  );
-  if (color) {
-    pool = [...new Set(pool.map((c) => c.slot))].flatMap((slot) => {
-      const inSlot = pool.filter((c) => c.slot === slot);
-      const matching = inSlot.filter((c) => hasColorDirection(c.color, color.direction));
-      return matching.length ? matching : inSlot;
-    });
-  }
-  return [...kept, ...pool];
-}
 
 // The 격식 수준 a 스타일 방향 moves away from: the day's basis's, or, without
 // one, the one most of the session's first 코디 has.
@@ -1047,17 +1073,62 @@ function missingSlots(clothes: Clothing[]): Slot[] {
   return missing;
 }
 
-// One 구매 추천 코디: owned clothes and one piece added, a new one or a
-// 정리한 옷 to restore; and how many owned pieces that one goes well with.
-export type PurchaseOutfit = {
-  outfit: Outfit;
-  added: { kind: "new"; id: string; piece: ClothingFields } | { kind: "restore"; clothing: Clothing };
-  matchesOwned: number;
+
+// A 구매 추천 세션 step as stored: the day it is for, the 격식 수준 the new
+// pieces are chosen at and the one a 스타일 방향 moves from, every new piece
+// the LLM proposed in the session so far, and the 구매 추천 with the 구매 대화
+// that led to it (none for the first).
+type PurchaseStep = {
+  day: FoundDay;
+  formality: Formality | null;
+  anchor: Formality | null;
+  pool: ClothingFields[];
+  result: PurchaseOutfits;
+  conversation: PurchaseConversation | null;
 };
 
-export type PurchaseOutfits =
-  | { kind: "with-wardrobe"; outfits: PurchaseOutfit[] }
-  | { kind: "all-new"; outfits: Partial<Record<Slot, ClothingFields>>[] }
-  | { kind: "unavailable" };
+// One 구매 대화 turn: what was said, every 구매 조건 so far, and the 비서 답장.
+export type PurchaseConversation = { message: string; conditions: PurchaseCondition[]; reply: string };
+
+// A 구매 대화 message that left the 구매 추천 as it was.
+//   failed: the LLM could not read it
+//   off-topic: 무관한 메시지
+//   unknown-clothing: it named a piece not found
+//   style-limit: no further in that 스타일 방향
+//   unbuildable: no 구매 추천 코디 meets the 구매 조건
+export type PurchaseUnapplied =
+  | { reason: "failed" | "off-topic" | "unknown-clothing" | "unbuildable"; message: string }
+  | { reason: "style-limit"; message: string; direction: StyleDirection };
+
+export type PurchaseRecommendation = PurchaseOutfits & {
+  date: string;
+  sessionId: string;
+  step: number;
+  conversation: PurchaseConversation | null;
+  unapplied: PurchaseUnapplied | null;
+};
+
+function purchaseView(
+  step: PurchaseStep,
+  sessionId: string,
+  index: number,
+  unapplied: PurchaseUnapplied | null,
+): PurchaseRecommendation {
+  return { ...step.result, date: step.day.date, sessionId, step: index, conversation: step.conversation, unapplied };
+}
+
+// What the LLM is told about the day for new pieces.
+function dayConditions(day: FoundDay, formality: Formality | null): DayConditions {
+  return { formality, temperature: day.weather?.temperature ?? null, rain: day.weather?.rain ?? null };
+}
+
+// The 격식 수준 most pieces of the first 구매 추천 코디 have, if any.
+function mostCommonFormality(result: PurchaseOutfits): Formality | null {
+  const first = result.kind === "unavailable" ? undefined : result.outfits[0];
+  if (!first) return null;
+  const counts = new Map<Formality, number>();
+  for (const { formality } of Object.values(first.outfit)) counts.set(formality, (counts.get(formality) ?? 0) + 1);
+  return maxBy([...counts], ([, count]) => count)![0];
+}
 
 export type OutfitRecommender = ReturnType<typeof createOutfitRecommender>;

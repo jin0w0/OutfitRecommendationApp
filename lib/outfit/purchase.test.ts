@@ -50,8 +50,10 @@ describe("구매 추천: 가진 옷 + 새 옷 1벌", () => {
       const pieces = Object.values(outfit);
       const newOnes = pieces.filter((c) => !ownedIds.has(c.id));
       expect(newOnes).toHaveLength(1);
-      expect(added.kind).toBe("new");
-      if (added.kind === "new") newLooks.add(`${added.piece.slot}|${added.piece.color}`);
+      expect(added).toHaveLength(1);
+      expect(added[0].kind).toBe("new");
+      expect(added[0].clothing).toBe(newOnes[0]);
+      newLooks.add(`${added[0].clothing.slot}|${added[0].clothing.color}`);
     }
     expect(newLooks.size).toBe(result.outfits.length);
   });
@@ -62,7 +64,7 @@ describe("구매 추천: 가진 옷 + 새 옷 1벌", () => {
 
     const result = await shop();
 
-    expect(result).toMatchObject({ kind: "with-wardrobe", outfits: [{ matchesOwned: 2 }] });
+    expect(result).toMatchObject({ kind: "with-wardrobe", outfits: [{ added: [{ matchesOwned: 2 }] }] });
   });
 
   test("a piece like one already owned is not suggested", async () => {
@@ -71,7 +73,7 @@ describe("구매 추천: 가진 옷 + 새 옷 1벌", () => {
 
     const result = await shop();
 
-    expect(result.kind === "with-wardrobe" && result.outfits.map((o) => o.added.kind === "new" && o.added.piece.name)).toEqual([
+    expect(result.kind === "with-wardrobe" && result.outfits.map((o) => o.added[0].clothing.name)).toEqual([
       "베이지 치노 팬츠",
     ]);
   });
@@ -98,7 +100,7 @@ describe("구매 추천: 가진 옷 + 새 옷 1벌", () => {
     const { pieceAdviser, shop } = await minji();
     pieceAdviser.failWith();
 
-    expect(await shop()).toEqual({ kind: "unavailable" });
+    expect(await shop()).toMatchObject({ kind: "unavailable" });
   });
 
   test("the same day again does not ask the LLM again", async () => {
@@ -124,9 +126,11 @@ describe("구매 추천: 옷장이 모자랄 때", () => {
 
     const result = await outfit.recommender.purchaseOutfits({ userId, date: DATE, situation: null, location: SEOUL });
 
-    expect(result).toEqual({
-      kind: "all-new",
-      outfits: [{ top: NAVY_CARDIGAN, bottom: BEIGE_PANTS, shoes: WHITE_SNEAKERS }],
-    });
+    expect(result.kind).toBe("all-new");
+    if (result.kind !== "all-new") return;
+    expect(result.outfits).toHaveLength(1);
+    const [{ outfit: shown, added }] = result.outfits;
+    expect(shown).toMatchObject({ top: NAVY_CARDIGAN, bottom: BEIGE_PANTS, shoes: WHITE_SNEAKERS });
+    expect(added.map((a) => a.kind)).toEqual(["new", "new", "new"]);
   });
 });

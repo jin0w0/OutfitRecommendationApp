@@ -14,6 +14,7 @@ import {
   type WeatherSource,
 } from "../recommender";
 import { createWardrobe, type EstimatedWearFrequency, type NewClothing } from "../wardrobe";
+import type { AskedPurchaseCondition, PurchaseReplyFacts, PurchaseRequest } from "../purchase";
 import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
@@ -243,7 +244,13 @@ export const FAKE_SENTENCE = "LLM이 쓴 문장:";
 class FakeLanguageModel implements LanguageModel {
   private judgements = new Map<string, EventJudgement>();
   private revisions = new Map<string, (request: RevisionRequest) => AskedCondition[]>();
+  private purchases = new Map<string, (request: PurchaseRequest) => AskedPurchaseCondition[]>();
   private failure: Error | null = null;
+  private replyFailure: Error | null = null;
+  // What each interpretPurchase call was given.
+  purchaseRequests: PurchaseRequest[] = [];
+  // What each writePurchaseReply call was given.
+  replyRequests: PurchaseReplyFacts[] = [];
   // What each judgeEvents call was given.
   judgeRequests: EventText[][] = [];
   // What each writeReasons call was given.
@@ -265,8 +272,36 @@ class FakeLanguageModel implements LanguageModel {
     this.revisions.set(message, typeof conditions === "function" ? conditions : () => conditions);
   }
 
+  // The 구매 대화 message `message` asks for `conditions`, or for what
+  // `conditions` makes of the 구매 추천 and 옷장 the user is looking at.
+  interpretPurchaseMessage(
+    message: string,
+    conditions: AskedPurchaseCondition[] | ((request: PurchaseRequest) => AskedPurchaseCondition[]),
+  ) {
+    this.purchases.set(message, typeof conditions === "function" ? conditions : () => conditions);
+  }
+
   failWith(error = new Error("the LLM is down")) {
     this.failure = error;
+  }
+
+  // Only the 비서 답장 fails.
+  failRepliesWith(error = new Error("the LLM is down")) {
+    this.replyFailure = error;
+  }
+
+  async interpretPurchase(request: PurchaseRequest) {
+    this.purchaseRequests.push(request);
+    if (this.failure) throw this.failure;
+    const conditions = this.purchases.get(request.message);
+    if (!conditions) throw new Error(`No 구매 조건 prepared for ${request.message}`);
+    return conditions(request);
+  }
+
+  async writePurchaseReply(facts: PurchaseReplyFacts) {
+    this.replyRequests.push(facts);
+    if (this.failure ?? this.replyFailure) throw this.failure ?? this.replyFailure;
+    return `${FAKE_SENTENCE} 답장`;
   }
 
   // Sentences say which factor they are for, so tests can tell them from

@@ -151,5 +151,11 @@ function languageModel(): LanguageModel {
   const missingKey = async (): Promise<never> => {
     throw new Error("Missing environment variable OPENAI_API_KEY");
   };
-  return { judgeEvents: missingKey, writeReasons: missingKey, interpretRevision: missingKey };
+  return {
+    judgeEvents: missingKey,
+    writeReasons: missingKey,
+    interpretRevision: missingKey,
+    interpretPurchase: missingKey,
+    writePurchaseReply: missingKey,
+  };
 }
