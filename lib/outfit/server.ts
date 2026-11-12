@@ -15,6 +15,7 @@ import {
 import { createWardrobe } from "./wardrobe";
 import { createWearRecords } from "./wear-records";
 import { createRecommendationSessions } from "./recommendation-sessions";
+import { createTuningStore } from "./tuning-store";
 import { createCloset, type Closet } from "./closet";
 import { createNeonPhotoStorage } from "./neon-photo-storage";
 import { createOpenAiClothingVision } from "./openai-vision";
@@ -92,6 +93,7 @@ export function getOutfitRecommender(): OutfitRecommender {
       wearRecords: createWearRecords({ dialect }),
       eventCorrections: createEventCorrections({ dialect }),
       sessions: createRecommendationSessions({ dialect }),
+      tuning: createTuningStore({ dialect }),
     });
   }
   return instance;

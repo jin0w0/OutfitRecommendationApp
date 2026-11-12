@@ -61,8 +61,8 @@ export type Reason = { evidence: Evidence; sentence: string };
 const MAX_REASONS = 3;
 const MIN_REASONS = 2;
 
-// The same defaults for every user for now.
-const WEIGHTS: Required<Scores> = {
+// Every user starts from these; 추천 맞춤 moves each within bounds.
+export const DEFAULT_WEIGHTS: Required<Scores> = {
   weather: 3,
   event: 3,
   color: 2,
@@ -98,6 +98,8 @@ export type ScoringFacts = {
   otherFormalities: Formality[];
   weather: Weather | null;
   preferences: Preferences;
+  // The user's 추천 맞춤 weights for each factor.
+  weights: Required<Scores>;
   // Per clothing id, days since its latest 착용 기록, or as its 추정 착용
   // 빈도 suggests when it has none. Absent if never worn.
   daysSinceWorn: Map<string, number>;
@@ -136,7 +138,7 @@ const FACTORS: Factor[] = ["weather", "event", "color", "style", "preference", "
 // MIN_REASONS while more factors added something, those factors give their
 // partial 근거 too (see partialEvidence).
 export function topEvidence(outfit: Outfit, scores: Scores, scoring: ScoringFacts): Evidence[] {
-  const contribution = (factor: Factor) => WEIGHTS[factor] * (scores[factor] ?? 0);
+  const contribution = (factor: Factor) => scoring.weights[factor] * (scores[factor] ?? 0);
   const contributing = FACTORS.filter((factor) => contribution(factor) > 0).sort(
     (a, b) => contribution(b) - contribution(a),
   );
@@ -298,9 +300,9 @@ function outerWarmth(temperature: number) {
   return temperature >= 12 ? 1 : temperature >= 5 ? 2 : 3;
 }
 
-export function total(scores: Scores) {
+export function total(scores: Scores, weights: Required<Scores>) {
   return Object.entries(scores).reduce(
-    (sum, [factor, value]) => sum + WEIGHTS[factor as keyof Scores] * value,
+    (sum, [factor, value]) => sum + weights[factor as keyof Scores] * value,
     0,
   );
 }

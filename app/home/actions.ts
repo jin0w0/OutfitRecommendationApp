@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { getOutfitRecommender } from "@/lib/outfit/server";
 import { isEventKind, isFormality } from "@/lib/outfit/situations";
+import { REJECTION_REASONS, type RejectionReason } from "@/lib/outfit/tuning";
 import { formDate, noticeParams } from "./home-state";
 
 async function requireUserId() {
@@ -22,6 +23,24 @@ function backHome(formData: FormData, sessionId: string | null, extra: [string, 
   if (sessionId) params.set("session", sessionId);
   for (const [name, value] of extra) params.append(name, value);
   redirect(`/home?${params}`);
+}
+
+// 거절, then 다시 추천받기: the next 코디 not shown yet for the date, as the
+// plain "shown" list in the URL has always done.
+export async function rejectOutfit(formData: FormData) {
+  const userId = await requireUserId();
+  const reason = String(formData.get("reason") ?? "");
+  await getOutfitRecommender().reject({
+    userId,
+    date: formDate(formData),
+    clothingIds: formData.getAll("clothing").map(String),
+    reason: REJECTION_REASONS.includes(reason as RejectionReason) ? (reason as RejectionReason) : null,
+  });
+  backHome(
+    formData,
+    null,
+    formData.getAll("shown").map((value) => ["shown", String(value)]),
+  );
 }
 
 // The 추천 세션 the form was sent from, if any.

@@ -9,6 +9,8 @@ import { ASSUMED_DAYS_SINCE_WORN, type Clothing, type Formality, type Slot, type
 import type { EventCorrections } from "./event-corrections";
 import type { WearRecords, WearStatus } from "./wear-records";
 import type { RecommendationSessions } from "./recommendation-sessions";
+import { multipliersFrom, REJECTION_REASONS, weightsFrom, type Multipliers, type RejectionReason } from "./tuning";
+import type { TuningStore } from "./tuning-store";
 import type {
   CalendarEvent,
   CalendarSource,
@@ -192,6 +194,7 @@ export function createOutfitRecommender({
   wearRecords,
   eventCorrections,
   sessions,
+  tuning,
   today = todayInKorea,
 }: {
   wardrobe: Pick<Wardrobe, "clothes" | "clothesIncludingTidied" | "preferences">;
@@ -201,6 +204,7 @@ export function createOutfitRecommender({
   wearRecords: WearRecords;
   eventCorrections: EventCorrections;
   sessions: RecommendationSessions;
+  tuning: TuningStore;
   // YYYY-MM-DD. Dates up to today are worn when accepted; later ones are plans.
   today?: () => string;
 }) {
@@ -331,7 +335,7 @@ export function createOutfitRecommender({
       const scoring = await scoringFacts(userId, day);
       const { candidates } = outfitsUnder(clothes, day.weather, formality, fixedConditions(piece));
       return candidates
-        .map((outfit) => ({ outfit, total: total(score(outfit, scoring)) }))
+        .map((outfit) => ({ outfit, total: total(score(outfit, scoring), scoring.weights) }))
         .sort((a, b) => b.total - a.total)
         .slice(0, STYLING_OUTFITS)
         .map(({ outfit }) => outfit);
@@ -499,6 +503,34 @@ export function createOutfitRecommender({
       return { ...step, sessionId: session.id, step: session.steps.length, revision, unapplied: null };
     },
 
+    // 거절: the user wanted another 코디 than `clothingIds` for `date`, maybe
+    // saying why. Only recorded; 다시 추천받기 then asks for the next 코디.
+    async reject({
+      userId,
+      date,
+      clothingIds,
+      reason = null,
+    }: {
+      userId: string;
+      date: string;
+      clothingIds: string[];
+      reason?: RejectionReason | null;
+    }) {
+      if (reason !== null && !REJECTION_REASONS.includes(reason)) throw new Error("Unknown 거절 이유");
+      void clothingIds;
+      await tuning.saveRejection(userId, { date, reason, dislikedClothingId: null });
+    },
+
+    // 추천 맞춤 보기: each factor's weight as a multiple of its default.
+    async tuning(userId: string): Promise<{ multipliers: Multipliers }> {
+      return { multipliers: multipliersFrom(await tuning.rejectionsSinceReset(userId)) };
+    },
+
+    // 추천 맞춤 되돌리기: back to the default weights.
+    async resetTuning(userId: string) {
+      await tuning.reset(userId);
+    },
+
     // 수락 취소: forgets the 착용 기록 or plan for `date`.
     async cancelAcceptance({ userId, date }: { userId: string; date: string }) {
       await wearRecords.remove(userId, date);
@@ -566,7 +598,7 @@ export function createOutfitRecommender({
         outfit,
         scores: score(outfit, scoring),
       })),
-      ({ scores }) => total(scores),
+      ({ scores }) => total(scores, scoring.weights),
     );
     if (!best) {
       return { status: "unbuildable", ...context, missingSlots: missingSlots(clothes) };
@@ -603,6 +635,7 @@ export function createOutfitRecommender({
       ),
       weather,
       preferences: await wardrobe.preferences(userId),
+      weights: weightsFrom(multipliersFrom(await tuning.rejectionsSinceReset(userId))),
       ...(await daysSinceLastWorn(userId, date)),
     };
   }

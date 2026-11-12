@@ -17,6 +17,7 @@ import { createWardrobe, type EstimatedWearFrequency, type NewClothing } from ".
 import { createEventCorrections } from "../event-corrections";
 import { createWearRecords } from "../wear-records";
 import { createRecommendationSessions } from "../recommendation-sessions";
+import { createTuningStore } from "../tuning-store";
 import { createCloset } from "../closet";
 import { createWardrobeAnalysis } from "../analysis";
 import { createAnalysisStore } from "../analysis-store";
@@ -40,6 +41,8 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
   await eventCorrections.migrate();
   const sessions = createRecommendationSessions({ dialect });
   await sessions.migrate();
+  const tuning = createTuningStore({ dialect });
+  await tuning.migrate();
   const weather = new FakeWeather();
   const calendar = new FakeCalendar();
   const llm = new FakeLanguageModel();
@@ -51,6 +54,7 @@ export async function createTestOutfit({ today = "2026-11-10" }: { today?: strin
     wearRecords,
     eventCorrections,
     sessions,
+    tuning,
     today: () => current,
   });
 

@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
-import { getCloset } from "@/lib/outfit/server";
+import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
 import type { Preferences } from "@/lib/outfit/wardrobe";
 
 export async function signOut() {
@@ -64,6 +64,15 @@ export async function savePreferences(formData: FormData) {
   if (formData.get("next") === "/settings") redirect("/settings");
   await account.passPreferencesStep(requestHeaders);
   redirect("/onboarding");
+}
+
+// 추천 맞춤 되돌리기.
+export async function resetTuning() {
+  const requestHeaders = await headers();
+  const user = await getAccount().getCurrentUser(requestHeaders);
+  if (!user) redirect("/");
+  await getOutfitRecommender().resetTuning(user.id);
+  redirect("/settings");
 }
 
 export async function skipPreferences() {

@@ -1,7 +1,16 @@
 import type { ReactNode } from "react";
 import { ClothingPhoto } from "../clothing-photo";
 import type { DayEvent, Factor, Outfit, Recommendation, Revision } from "@/lib/outfit/recommender";
-import { acceptOutfit, cancelAcceptance, correctEvent, reviseOutfit, undoRevision } from "./actions";
+import { acceptOutfit, cancelAcceptance, correctEvent, rejectOutfit, reviseOutfit, undoRevision } from "./actions";
+
+// 거절 이유 as the user picks them; 입기 싫은 옷 comes with choosing the piece.
+const REJECTION_CHOICES = [
+  ["color", "색 조합이 별로예요"],
+  ["taste", "스타일이 내 취향이 아니에요"],
+  ["weather", "날씨에 안 맞아요"],
+  ["event", "일정에 안 어울려요"],
+  ["other", "그냥 다른 걸 보고 싶어요"],
+] as const;
 import { EVENT_KINDS, FORMALITY_NAMES, type EventKind } from "@/lib/outfit/situations";
 import {
   SLOT_NAMES,
@@ -137,12 +146,28 @@ export function RecommendationView({
                 입을게요
               </button>
             </form>
-            {/* Plain GET form: the 코디 shown so far live in the URL. */}
-            <form action="/home">
+            {/* 거절: the 코디 shown so far go on in the URL, as before. */}
+            <form action={rejectOutfit} className="flex flex-wrap items-center gap-2">
               {hidden}
               {shownParams([...shown, Object.values(recommendation.outfit).map((c) => c.id)]).map((value) => (
                 <input key={value} type="hidden" name="shown" value={value} />
               ))}
+              {Object.values(recommendation.outfit).map((clothing) => (
+                <input key={clothing.id} type="hidden" name="clothing" value={clothing.id} />
+              ))}
+              <select
+                name="reason"
+                defaultValue=""
+                aria-label="마음에 들지 않은 점"
+                className="h-10 rounded-full border border-zinc-300 bg-transparent px-3 text-sm dark:border-zinc-700"
+              >
+                <option value="">이유는 건너뛸게요</option>
+                {REJECTION_CHOICES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
               <button
                 type="submit"
                 className="h-10 rounded-full border border-zinc-300 px-5 dark:border-zinc-700"

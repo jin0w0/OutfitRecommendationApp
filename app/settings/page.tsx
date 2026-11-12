@@ -8,6 +8,7 @@ import { PreferencesForm } from "../preferences-form";
 import { RegionForm } from "../region-form";
 import { CalendarSection } from "./calendar-section";
 import { DeleteAccountSection } from "./delete-account";
+import { TuningSection } from "./tuning-section";
 
 export default function Settings({ searchParams }: PageProps<"/settings">) {
   return (
@@ -43,6 +44,7 @@ async function SettingsSections({ searchParams }: Pick<PageProps<"/settings">, "
         connection={user.calendarConnection}
         notice={typeof calendar === "string" ? calendar : undefined}
       />
+      <TuningSection userId={user.id} />
       <LoginSection email={user.email} />
       <DeleteAccountSection />
     </>
