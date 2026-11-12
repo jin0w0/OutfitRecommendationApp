@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { ClothingSighting, ClothingVision, Photo, PhotoStorage } from "./closet-ports";
 import {
+  CLOTHING_LINES,
   COLORS,
   ESTIMATED_WEAR_FREQUENCIES,
   FORMALITIES,
@@ -15,6 +16,7 @@ import {
   WARMTHS,
   type Clothing,
   type ClothingFields,
+  type ClothingLine,
   type EstimatedWearFrequency,
   type Preferences,
   type Wardrobe,
@@ -159,6 +161,14 @@ export function createCloset({
         throw new Error("Colors and styles must come from the lists");
       }
       await wardrobe.setPreferences(userId, { colors: [...new Set(colors)], styles: [...new Set(styles)] });
+    },
+
+    // 추천받을 옷 구분 읽기·저장하기.
+    clothingLine: (userId: string) => wardrobe.clothingLine(userId),
+
+    async setClothingLine(userId: string, line: ClothingLine) {
+      if (!CLOTHING_LINES.includes(line)) throw new Error("The 추천받을 옷 구분 must come from the list");
+      await wardrobe.setClothingLine(userId, line);
     },
 
     // 탈퇴: every photo the user ever uploaded, registered or only analysed.

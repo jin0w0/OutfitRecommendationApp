@@ -37,8 +37,14 @@ async function SettingsSections({ searchParams }: Pick<PageProps<"/settings">, "
         <RegionForm current={user.homeRegion} next="/settings" submitLabel="저장" />
       </section>
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">선호 색상·스타일</h2>
-        <PreferencesForm current={await getCloset().preferences(user.id)} next="/settings" />
+        <h2 className="font-medium">추천받을 옷·선호 색상·스타일</h2>
+        <PreferencesForm
+          current={{
+            ...(await getCloset().preferences(user.id)),
+            line: await getCloset().clothingLine(user.id),
+          }}
+          next="/settings"
+        />
       </section>
       <CalendarSection
         connection={user.calendarConnection}

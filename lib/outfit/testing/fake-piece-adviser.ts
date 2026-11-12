@@ -1,4 +1,4 @@
-import type { PieceAdviser, PieceTarget } from "../one-more-piece";
+import type { AdviserPreferences, PieceAdviser, PieceTarget } from "../one-more-piece";
 
 // The LLM's 한 벌 후보, answering what the test prepared every time it is asked.
 export class FakePieceAdviser implements PieceAdviser {
@@ -7,6 +7,8 @@ export class FakePieceAdviser implements PieceAdviser {
   private requestProposals: unknown[] | null = null;
   // Every target pieces were asked for.
   targets: PieceTarget[] = [];
+  // The preferences every request came with.
+  preferencesSeen: AdviserPreferences[] = [];
   private failure: Error | null = null;
   // How many times the LLM was asked.
   calls = 0;
@@ -29,16 +31,18 @@ export class FakePieceAdviser implements PieceAdviser {
     this.failure = error;
   }
 
-  async proposePieces({ target }: { target: PieceTarget }) {
+  async proposePieces({ target, preferences }: { target: PieceTarget; preferences: AdviserPreferences }) {
     this.calls++;
+    this.preferencesSeen.push(preferences);
     this.targets.push(target);
     if (this.failure) throw this.failure;
     if ("day" in target && target.request && this.requestProposals) return this.requestProposals;
     return this.proposals;
   }
 
-  async proposeOutfits() {
+  async proposeOutfits({ preferences }: { preferences: AdviserPreferences }) {
     this.calls++;
+    this.preferencesSeen.push(preferences);
     if (this.failure) throw this.failure;
     return this.outfitProposals;
   }

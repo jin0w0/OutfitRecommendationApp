@@ -103,6 +103,17 @@ export type Registration = {
 
 export type Preferences = { colors: Color[]; styles: Style[] };
 
+// 추천받을 옷 구분: whether new pieces are suggested from menswear or
+// womenswear. Null until the user chooses, which filters nothing.
+export const CLOTHING_LINES = ["menswear", "womenswear"] as const;
+export type ClothingLine = (typeof CLOTHING_LINES)[number];
+
+// Whether a new piece of `slot` may be suggested under the 추천받을 옷 구분:
+// never a 원피스 for menswear. Owned clothes are never filtered.
+export function suitsLine(slot: Slot, line: ClothingLine | null) {
+  return line !== "menswear" || slot !== "dress";
+}
+
 type Tables = {
   clothing: {
     id: string;
@@ -128,6 +139,7 @@ type Tables = {
     user_id: string;
     colors: JSONColumnType<Color[]>;
     styles: JSONColumnType<Style[]>;
+    clothing_line: Generated<ClothingLine | null>;
   };
 };
 
@@ -202,6 +214,8 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
         .addColumn("colors", "jsonb", (c) => c.notNull())
         .addColumn("styles", "jsonb", (c) => c.notNull())
         .execute();
+      // Added with 추천받을 옷 구분.
+      await sql`alter table clothing_preference add column if not exists clothing_line text`.execute(db);
     },
 
     async addClothing(userId: string, clothing: NewClothing, registration?: Registration): Promise<Clothing> {
@@ -321,6 +335,23 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
         .where("user_id", "=", userId)
         .executeTakeFirst();
       return row ?? { colors: [], styles: [] };
+    },
+
+    async setClothingLine(userId: string, line: ClothingLine) {
+      await db
+        .insertInto("clothing_preference")
+        .values({ user_id: userId, colors: JSON.stringify([]), styles: JSON.stringify([]), clothing_line: line })
+        .onConflict((oc) => oc.column("user_id").doUpdateSet({ clothing_line: line }))
+        .execute();
+    },
+
+    async clothingLine(userId: string): Promise<ClothingLine | null> {
+      const row = await db
+        .selectFrom("clothing_preference")
+        .select("clothing_line")
+        .where("user_id", "=", userId)
+        .executeTakeFirst();
+      return row?.clothing_line ?? null;
     },
   };
 }

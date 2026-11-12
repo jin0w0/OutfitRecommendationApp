@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccount } from "@/lib/account/server";
 import { getCloset, getOutfitRecommender } from "@/lib/outfit/server";
-import type { Preferences } from "@/lib/outfit/wardrobe";
+import { CLOTHING_LINES, type ClothingLine, type Preferences } from "@/lib/outfit/wardrobe";
 
 export async function signOut() {
   const requestHeaders = await headers();
@@ -61,6 +61,8 @@ export async function savePreferences(formData: FormData) {
     colors: formData.getAll("color").map(String) as Preferences["colors"],
     styles: formData.getAll("style").map(String) as Preferences["styles"],
   });
+  const line = formData.get("line");
+  if (CLOTHING_LINES.includes(line as ClothingLine)) await getCloset().setClothingLine(user.id, line as ClothingLine);
   if (formData.get("next") === "/settings") redirect("/settings");
   await account.passPreferencesStep(requestHeaders);
   redirect("/onboarding");
@@ -82,6 +84,14 @@ export async function setTiltOff(formData: FormData) {
   if (!user) redirect("/");
   await getOutfitRecommender().setTiltOff(user.id, formData.get("off") === "true");
   redirect("/settings");
+}
+
+// 추천받을 옷 구분, from the card on the main screen.
+export async function saveClothingLine(formData: FormData) {
+  const user = await getAccount().getCurrentUser(await headers());
+  if (!user) redirect("/");
+  await getCloset().setClothingLine(user.id, String(formData.get("line")) as ClothingLine);
+  redirect("/home");
 }
 
 export async function skipPreferences() {

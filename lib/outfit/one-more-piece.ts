@@ -8,7 +8,16 @@ import { addDays, todayInKorea } from "./dates";
 import type { PieceStore } from "./one-more-piece-store";
 import type { PieceRequest } from "./purchase";
 import { candidateOutfits, isWellMatched } from "./scoring";
-import type { Clothing, ClothingFields, Formality, Preferences, Slot, Wardrobe } from "./wardrobe";
+import {
+  suitsLine,
+  type Clothing,
+  type ClothingFields,
+  type ClothingLine,
+  type Formality,
+  type Preferences,
+  type Slot,
+  type Wardrobe,
+} from "./wardrobe";
 
 // How many new well-matched 코디 a piece must bring to be suggested.
 const TO_REVIVE = 2;
@@ -29,15 +38,19 @@ export type PieceTarget =
   | { fill: Slot }
   | { day: DayConditions; request?: PieceRequest };
 
+// What the LLM is told of the user's taste: the 선호 색상·스타일 and the
+// 추천받을 옷 구분 (null when not chosen).
+export type AdviserPreferences = Preferences & { line: ClothingLine | null };
+
 // The 한 벌 후보 어댑터: candidate pieces for the target, unchecked.
 export type PieceAdviser = {
   proposePieces(request: {
     target: PieceTarget;
     wardrobe: ClothingFields[];
-    preferences: Preferences;
+    preferences: AdviserPreferences;
   }): Promise<unknown[]>;
   // Whole 코디 of pieces the user does not have, for the day: each { pieces }.
-  proposeOutfits(request: { day: DayConditions; preferences: Preferences }): Promise<unknown[]>;
+  proposeOutfits(request: { day: DayConditions; preferences: AdviserPreferences }): Promise<unknown[]>;
 };
 
 export type PieceSuggestion =
@@ -51,7 +64,7 @@ export function createPieceSuggestions({
   store,
   today = todayInKorea,
 }: {
-  wardrobe: Pick<Wardrobe, "clothes" | "tidiedClothes" | "preferences">;
+  wardrobe: Pick<Wardrobe, "clothes" | "tidiedClothes" | "preferences" | "clothingLine">;
   adviser: PieceAdviser;
   store: PieceStore;
   today?: () => string;
@@ -93,13 +106,16 @@ export function createPieceSuggestions({
     target: PieceTarget,
     brings: (candidate: ClothingFields) => number,
   ): Promise<PieceSuggestion[]> {
-    const [clothes, tidied, preferences, dismissed] = await Promise.all([
+    const [clothes, tidied, preferences, line, dismissed] = await Promise.all([
       wardrobe.clothes(userId),
       wardrobe.tidiedClothes(userId),
       wardrobe.preferences(userId),
+      wardrobe.clothingLine(userId),
       store.dismissedOn(userId, today()),
     ]);
-    const candidates = await candidatesFor(userId, targetKey, target, clothes, tidied, preferences);
+    const candidates = (
+      await candidatesFor(userId, targetKey, target, clothes, tidied, { ...preferences, line })
+    ).filter((candidate) => suitsLine(candidate.slot, line));
     const needed = "revive" in target ? TO_REVIVE : TO_FILL;
 
     const suggestions: PieceSuggestion[] = [];
@@ -131,9 +147,9 @@ export function createPieceSuggestions({
     target: PieceTarget,
     clothes: Clothing[],
     tidied: Clothing[],
-    preferences: Preferences,
+    preferences: AdviserPreferences,
   ): Promise<ClothingFields[]> {
-    const fingerprint = fingerprintOf(clothes, tidied);
+    const fingerprint = fingerprintOf(clothes, tidied, preferences.line);
     let raw = await store.candidates(userId, targetKey, fingerprint);
     if (!raw) {
       try {
@@ -180,14 +196,15 @@ export function fieldsOf({ name, slot, color, seasons, style, formality, warmth,
   return { name, slot, color, seasons, style, formality, warmth, material };
 }
 
-// Changes whenever a piece is added, changed, 정리 or restored.
-export function fingerprintOf(clothes: Clothing[], tidied: Clothing[]) {
+// Changes whenever a piece is added, changed, 정리 or restored, or the
+// 추천받을 옷 구분 is chosen or changed.
+export function fingerprintOf(clothes: Clothing[], tidied: Clothing[], line: ClothingLine | null = null) {
   const describe = (list: Clothing[]) =>
     list
       .map(fieldsOf)
       .map((fields, i) => JSON.stringify([list[i].id, fields]))
       .sort();
   return createHash("sha256")
-    .update(JSON.stringify([describe(clothes), describe(tidied)]))
+    .update(JSON.stringify(line ? [describe(clothes), describe(tidied), line] : [describe(clothes), describe(tidied)]))
     .digest("hex");
 }
