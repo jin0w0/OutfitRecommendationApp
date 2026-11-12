@@ -356,3 +356,15 @@ describe("정리하기", () => {
     expect((await recommend()).accepted?.clothes.map((c) => c.id)).toEqual([oldTop.id, jeans.id, sneakers.id]);
   });
 });
+
+describe("사진 하나에 옷 한 벌", () => {
+  test("a photo already registered cannot be registered again for another piece", async () => {
+    const { closet, minji, photoId } = await minjiWithAnalysedKnit();
+    await closet.register(minji, { photoId, clothing: NAVY_KNIT, estimatedWearFrequency: "weekly" });
+
+    await expect(
+      closet.register(minji, { photoId, clothing: { ...NAVY_KNIT, name: "또 니트" }, estimatedWearFrequency: "weekly" }),
+    ).rejects.toThrow();
+    expect(await closet.clothes(minji)).toHaveLength(1);
+  });
+});

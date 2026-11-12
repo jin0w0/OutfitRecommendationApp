@@ -60,6 +60,9 @@ export type Verdict =
 // What the user is offered for it.
 export type Remedy = "styling-outfits" | "season-reminder" | "care-tips" | "tidy-suggestion";
 
+// 이번 주에 꺼내 볼 옷, and whether 다른 옷 보기 has anything else to show.
+export type WeeklyPick = UnwornClothing & { hasOthers: boolean };
+
 export type UnwornClothing = {
   clothing: Clothing;
   // The latest 착용 기록's date, or null if never worn.
@@ -115,9 +118,9 @@ export function createWardrobeAnalysis({
         if (kept && date < kept) return [];
         const registered = registeredAt.get(clothing.id);
         const age = registered ? daysBetween(koreaDate(registered), date) : Infinity;
-        // An answer holds until the piece is worn after it.
+        // An answer holds until the piece is worn on or after the day of it.
         const answered = answers.get(clothing.id);
-        const answer = answered && (!lastWornOn || lastWornOn <= answered.answeredOn) ? answered.answer : null;
+        const answer = answered && (!lastWornOn || lastWornOn < answered.answeredOn) ? answered.answer : null;
         const verdict: Verdict = age < NEW_DAYS ? { kind: "new" } : diagnose(clothing, facts, answer);
         return [
           {
@@ -144,18 +147,18 @@ export function createWardrobeAnalysis({
     },
 
     // 이번 주에 꺼내 볼 옷: the same piece all week, while it stays a candidate.
-    async weeklyPick(userId: string): Promise<UnwornClothing | null> {
+    async weeklyPick(userId: string): Promise<WeeklyPick | null> {
       const candidates = await pickCandidates(userId);
       const week = weekStart(today());
       const saved = await store.weeklyPick(userId);
       const thisWeek = saved?.weekStart === week ? saved : null;
       const current = thisWeek && candidates.find((u) => u.clothing.id === thisWeek.clothingId);
-      if (current) return current;
+      if (current) return { ...current, hasOthers: candidates.length > 1 };
       return choose(userId, candidates, week, thisWeek?.shown ?? []);
     },
 
     // 다른 옷 보기: the next candidate not shown this week, or the first again.
-    async showAnotherPick(userId: string): Promise<UnwornClothing | null> {
+    async showAnotherPick(userId: string): Promise<WeeklyPick | null> {
       const candidates = await pickCandidates(userId);
       const week = weekStart(today());
       const saved = await store.weeklyPick(userId);
@@ -187,7 +190,12 @@ export function createWardrobeAnalysis({
   }
 
   // The first candidate not in `shown`; after all were shown, the first again.
-  async function choose(userId: string, candidates: UnwornClothing[], week: string, shown: string[]) {
+  async function choose(
+    userId: string,
+    candidates: UnwornClothing[],
+    week: string,
+    shown: string[],
+  ): Promise<WeeklyPick | null> {
     if (candidates.length === 0) return null;
     const next = candidates.find((u) => !shown.includes(u.clothing.id));
     const picked = next ?? candidates[0];
@@ -196,7 +204,7 @@ export function createWardrobeAnalysis({
       clothingId: picked.clothing.id,
       shown: next ? [...shown, picked.clothing.id] : [picked.clothing.id],
     });
-    return picked;
+    return { ...picked, hasOthers: candidates.length > 1 };
   }
 
   async function requireOwn(userId: string, clothingId: string) {

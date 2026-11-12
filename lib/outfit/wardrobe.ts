@@ -253,6 +253,17 @@ export function createWardrobe({ dialect }: { dialect: Dialect }) {
       return new Map(rows.map((row) => [row.id, row.created_at]));
     },
 
+    // Whether one of the user's clothes already has this photo.
+    async photoInUse(userId: string, photoKey: string): Promise<boolean> {
+      const row = await db
+        .selectFrom("clothing")
+        .select("id")
+        .where("user_id", "=", userId)
+        .where("photo_key", "=", photoKey)
+        .executeTakeFirst();
+      return row !== undefined;
+    },
+
     // Where a piece's photo is kept, if it is the user's and has one.
     async photoKey(userId: string, clothingId: string): Promise<string | null> {
       const row = await db

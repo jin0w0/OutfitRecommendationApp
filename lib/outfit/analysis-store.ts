@@ -44,7 +44,7 @@ export function createAnalysisStore({ dialect }: { dialect: Dialect }) {
         .ifNotExists()
         .addColumn("user_id", "text", (c) => c.primaryKey().references("user.id").onDelete("cascade"))
         .addColumn("week_start", "text", (c) => c.notNull())
-        .addColumn("clothing_id", "text", (c) => c.notNull())
+        .addColumn("clothing_id", "text", (c) => c.notNull().references("clothing.id").onDelete("cascade"))
         .addColumn("shown", "jsonb", (c) => c.notNull())
         .execute();
     },

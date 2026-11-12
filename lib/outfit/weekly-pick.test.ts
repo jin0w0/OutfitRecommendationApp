@@ -81,4 +81,18 @@ describe("이번 주에 꺼내 볼 옷", () => {
 
     expect(await outfit.analysis.weeklyPick(userId)).toBeNull();
   });
+
+  test("whether another piece could be shown instead is told", async () => {
+    const { analysis, userId } = await minjiWithUnwornTops();
+    expect(await analysis.weeklyPick(userId)).toMatchObject({ hasOthers: true });
+
+    const outfit = await createTestOutfit({ today: MONDAY });
+    const solo = await outfit.createUser("solo@gmail.com");
+    await outfit.addClothes(solo, [
+      { name: "하나뿐인 셔츠", slot: "top", registeredOn: "2025-01-01" },
+      { name: "슬랙스", slot: "bottom", registeredOn: "2025-01-01", estimatedWearFrequency: "weekly" },
+      { name: "구두", slot: "shoes", registeredOn: "2025-01-01", estimatedWearFrequency: "weekly" },
+    ]);
+    expect(await outfit.analysis.weeklyPick(solo)).toMatchObject({ hasOthers: false });
+  });
 });

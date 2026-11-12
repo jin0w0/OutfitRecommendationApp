@@ -93,6 +93,8 @@ export function createCloset({
       }
       const key = photoKey(userId, photoId);
       if (!(await photos.exists(key))) throw new Error("No such photo for this user");
+      // One photo, one piece: replacing a shared photo would take it from both.
+      if (await wardrobe.photoInUse(userId, key)) throw new Error("This photo is already registered");
       return wardrobe.addClothing(userId, fields, { photoKey: key, estimatedWearFrequency });
     },
 

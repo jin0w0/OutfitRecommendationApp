@@ -17,11 +17,13 @@ export async function WeeklyPick({ userId }: { userId: string }) {
           {pick.clothing.name}
         </Link>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">{verdictSentence(pick)}</p>
-        <form action={showAnotherWeeklyPick}>
-          <button type="submit" className="text-xs text-zinc-500 underline">
-            다른 옷 보기
-          </button>
-        </form>
+        {pick.hasOthers && (
+          <form action={showAnotherWeeklyPick}>
+            <button type="submit" className="text-xs text-zinc-500 underline">
+              다른 옷 보기
+            </button>
+          </form>
+        )}
       </div>
     </section>
   );

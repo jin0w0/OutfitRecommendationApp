@@ -104,6 +104,9 @@ function UserBar({ user }: { user: CurrentUser }) {
         <img src={user.image} alt="" className="h-10 w-10 rounded-full" />
       )}
       <span className="flex-1 font-medium">{user.name}</span>
+      <Link href="/wardrobe/new" className="text-sm text-zinc-600 underline dark:text-zinc-400">
+        옷 등록
+      </Link>
       <Link href="/wardrobe" className="text-sm text-zinc-600 underline dark:text-zinc-400">
         옷장
       </Link>

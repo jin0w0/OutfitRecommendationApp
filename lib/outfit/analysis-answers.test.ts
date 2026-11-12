@@ -78,3 +78,15 @@ describe("그대로 두기", () => {
     expect(await shirtNow()).toBeDefined();
   });
 });
+
+describe("답한 날 입은 경우", () => {
+  test("a wear on the very day of the answer also undoes it", async () => {
+    const { analysis, recommender, setToday, userId, shirt, slacks, shoes, shirtNow } = await minjiAskedAboutShirt();
+    await analysis.answer(userId, shirt.id, "changed-mind");
+
+    await recommender.accept({ userId, date: "2026-11-10", clothingIds: [shirt.id, slacks.id, shoes.id] });
+    setToday("2026-12-20");
+
+    expect(await shirtNow()).toMatchObject({ verdict: { kind: "ask" } });
+  });
+});
